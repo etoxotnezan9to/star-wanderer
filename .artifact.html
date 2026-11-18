@@ -1,0 +1,956 @@
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #04060d;
+    color: #cfd8e3;
+    font-family: system-ui, "Segoe UI", sans-serif;
+  }
+  #scene {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  #panel {
+    position: fixed;
+    left: 12px;
+    top: 12px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    max-width: min(560px, calc(100vw - 24px));
+    z-index: 10;
+  }
+  #panel button {
+    background: #12203a;
+    color: #cfd8e3;
+    border: 1px solid #2b3f66;
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  #panel button:hover {
+    background: #1a2c50;
+    border-color: #41598c;
+  }
+  #panel button.active {
+    background: #23406f;
+    border-color: #5b7fc4;
+  }
+  #help {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #8296b0;
+    background: rgba(4, 6, 13, 0.6);
+    border: 1px solid #1c2a45;
+    border-radius: 6px;
+    padding: 8px 12px;
+    max-width: min(520px, calc(100vw - 24px));
+    z-index: 10;
+  }
+</style>
+
+<canvas id="scene"></canvas>
+<div id="panel">
+  <button id="btnReset" title="Встать на начало полёта">Сброс полёта</button>
+  <button id="btnPlanets" title="Новое случайное расположение планет">Новое расположение планет</button>
+  <button id="btnTrail" class="active" title="Показывать или прятать след">След: да</button>
+  <button id="btnZoomIn" title="Приблизить">Зум +</button>
+  <button id="btnZoomOut" title="Отдалить">Зум −</button>
+</div>
+<div id="help">
+  Мышь: перетащите, чтобы поставить спутник и задать направление и скорость
+  (длиннее стрелка — быстрее). Колёсико — зум. Стрелки клавиатуры — двигатели
+  (тратят топливо, ускорение в противоположном направлении). Кнопки — сброс,
+  новые планеты, след, зум.
+</div>
+
+<script>
+'use strict';
+
+const SIM = (() => {
+  const STORAGE_KEY = 'satellite-sim.planets.v1';
+
+  const G = 5000;
+  const DT = 1 / 240;
+  const SUBSTEPS = 4;
+  const SOFTEN = 4;
+  const SOFTEN2 = SOFTEN * SOFTEN;
+  const PLANET_MIN_R = 16;
+  const PLANET_MAX_R = 42;
+  const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
+  const MAX_TRAIL = 4000;
+  const FUEL_MAX = 100;
+  const FUEL_BURN_PER_FRAME = 0.35;
+  const THRUST_ACCEL = 120;
+  const BARREL_COUNT = 5;
+  const BARREL_RADIUS = 20;
+  const BARREL_REFUEL = 25;
+
+  const world = {
+    width: 2000,
+    height: 1200,
+    planets: [],
+    stars: [],
+    fuelBarrels: [],
+  };
+
+  const satellite = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    start: null,
+    trail: [],
+    crashed: false,
+    crashedPlanet: null,
+    fuel: FUEL_MAX,
+    thrustDir: null,
+    angle: 0,
+  };
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function makePlanets() {
+    const planets = [];
+    for (let i = 0; i < 3; i++) {
+      const r = rand(PLANET_MIN_R, PLANET_MAX_R);
+      planets.push({
+        x: rand(r + 60, world.width - r - 60),
+        y: rand(r + 60, world.height - r - 60),
+        r,
+        mass: r * r * 2,
+        color: PLANET_COLORS[i % PLANET_COLORS.length],
+      });
+    }
+    return planets;
+  }
+
+  function makeStars() {
+    const stars = [];
+    const count = Math.round((world.width * world.height) / 4000);
+    for (let i = 0; i < count; i++) {
+      stars.push({
+        x: rand(0, world.width),
+        y: rand(0, world.height),
+        r: rand(0.4, 1.6),
+        a: rand(0.25, 0.9),
+      });
+    }
+    return stars;
+  }
+
+  function makeFuelBarrels() {
+    const barrels = [];
+    for (let i = 0; i < BARREL_COUNT; i++) {
+      barrels.push({
+        x: rand(60, world.width - 60),
+        y: rand(60, world.height - 60),
+        r: BARREL_RADIUS,
+      });
+    }
+    return barrels;
+  }
+
+  function savePlanets() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(world.planets));
+    } catch {
+      /* хранилище недоступно — игнорируем */
+    }
+  }
+
+  function loadPlanets() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list) || list.length !== 3) return false;
+      for (const p of list) {
+        if (typeof p.x !== 'number' || typeof p.y !== 'number' ||
+            typeof p.r !== 'number' || typeof p.mass !== 'number' ||
+            typeof p.color !== 'string') return false;
+        if (!(p.x > 0 && p.x < world.width && p.y > 0 && p.y < world.height)) {
+          return false;
+        }
+      }
+      world.planets = list;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function updateAngle() {
+    const sp = Math.hypot(satellite.vx, satellite.vy);
+    if (sp > 1e-9) {
+      satellite.angle = Math.atan2(satellite.vy, satellite.vx);
+    }
+  }
+
+  function init() {
+    if (!loadPlanets()) {
+      world.planets = makePlanets();
+      savePlanets();
+    }
+    world.stars = makeStars();
+    world.fuelBarrels = makeFuelBarrels();
+    satellite.x = world.width / 2;
+    satellite.y = world.height / 2;
+    satellite.vx = 0;
+    satellite.vy = 0;
+    satellite.start = null;
+    satellite.trail = [];
+    satellite.crashed = false;
+    satellite.crashedPlanet = null;
+    satellite.fuel = FUEL_MAX;
+    satellite.thrustDir = null;
+    satellite.angle = 0;
+  }
+
+  function randomizePlanets() {
+    world.planets = makePlanets();
+    world.fuelBarrels = makeFuelBarrels();
+    savePlanets();
+    satellite.start = null;
+    satellite.trail = [];
+    satellite.crashed = false;
+    satellite.crashedPlanet = null;
+    satellite.fuel = FUEL_MAX;
+    satellite.thrustDir = null;
+    satellite.angle = 0;
+  }
+
+  function placeSatellite(x, y, vx, vy) {
+    satellite.start = { x, y, vx, vy };
+    satellite.x = x;
+    satellite.y = y;
+    satellite.vx = vx;
+    satellite.vy = vy;
+    satellite.trail = [];
+    satellite.crashed = false;
+    satellite.crashedPlanet = null;
+    satellite.fuel = FUEL_MAX;
+    satellite.thrustDir = null;
+    updateAngle();
+  }
+
+  function resetSatellite() {
+    if (!satellite.start) return;
+    const s = satellite.start;
+    satellite.x = s.x;
+    satellite.y = s.y;
+    satellite.vx = s.vx;
+    satellite.vy = s.vy;
+    satellite.trail = [];
+    satellite.crashed = false;
+    satellite.crashedPlanet = null;
+    satellite.fuel = FUEL_MAX;
+    satellite.thrustDir = null;
+    updateAngle();
+  }
+
+  // dirX, dirY — direction of acceleration in world coordinates (where the
+  // satellite's nose points after thrust). Exhaust comes out opposite.
+  function thrust(dirX, dirY) {
+    if (satellite.crashed || satellite.fuel <= 0) return false;
+    const len = Math.hypot(dirX, dirY);
+    if (len < 1e-9) return false;
+    const ux = dirX / len;
+    const uy = dirY / len;
+    const burn = Math.min(FUEL_BURN_PER_FRAME, satellite.fuel);
+    satellite.fuel -= burn;
+    satellite.vx += ux * THRUST_ACCEL * DT * SUBSTEPS;
+    satellite.vy += uy * THRUST_ACCEL * DT * SUBSTEPS;
+    // thrustDir stores the exhaust direction (opposite to acceleration)
+    satellite.thrustDir = { x: -ux, y: -uy };
+    return true;
+  }
+
+  function setThrustDir(dirX, dirY) {
+    if (dirX === null) {
+      satellite.thrustDir = null;
+      return;
+    }
+    const len = Math.hypot(dirX, dirY);
+    if (len < 1e-9) {
+      satellite.thrustDir = null;
+      return;
+    }
+    satellite.thrustDir = { x: dirX / len, y: dirY / len };
+  }
+
+  function checkCrash() {
+    if (satellite.crashed) return;
+    for (const p of world.planets) {
+      const dx = satellite.x - p.x;
+      const dy = satellite.y - p.y;
+      if (dx * dx + dy * dy <= p.r * p.r) {
+        satellite.crashed = true;
+        satellite.crashedPlanet = p;
+        return;
+      }
+    }
+  }
+
+  function accelAt(x, y) {
+    let ax = 0;
+    let ay = 0;
+    for (const p of world.planets) {
+      const dx = p.x - x;
+      const dy = p.y - y;
+      const d2 = dx * dx + dy * dy + SOFTEN2;
+      const invD3 = 1 / (d2 * Math.sqrt(d2));
+      const f = G * p.mass * invD3;
+      ax += f * dx;
+      ay += f * dy;
+    }
+    return { ax, ay };
+  }
+
+  function rk4Step() {
+    const { x, y, vx, vy } = satellite;
+    const h = DT;
+
+    const a1 = accelAt(x, y);
+    const k1x = vx;
+    const k1y = vy;
+    const k1vx = a1.ax;
+    const k1vy = a1.ay;
+
+    const a2 = accelAt(x + k1x * h / 2, y + k1y * h / 2);
+    const k2x = vx + k1vx * h / 2;
+    const k2y = vy + k1vy * h / 2;
+    const k2vx = a2.ax;
+    const k2vy = a2.ay;
+
+    const a3 = accelAt(x + k2x * h / 2, y + k2y * h / 2);
+    const k3x = vx + k2vx * h / 2;
+    const k3y = vy + k2vy * h / 2;
+    const k3vx = a3.ax;
+    const k3vy = a3.ay;
+
+    const a4 = accelAt(x + k3x * h, y + k3y * h);
+    const k4x = vx + k3vx * h;
+    const k4y = vy + k3vy * h;
+    const k4vx = a4.ax;
+    const k4vy = a4.ay;
+
+    satellite.x = x + (h / 6) * (k1x + 2 * k2x + 2 * k3x + k4x);
+    satellite.y = y + (h / 6) * (k1y + 2 * k2y + 2 * k3y + k4y);
+    satellite.vx = vx + (h / 6) * (k1vx + 2 * k2vx + 2 * k3vx + k4vx);
+    satellite.vy = vy + (h / 6) * (k1vy + 2 * k2vy + 2 * k3vy + k4vy);
+  }
+
+  function checkBarrels() {
+    if (satellite.crashed) return;
+    for (let i = world.fuelBarrels.length - 1; i >= 0; i--) {
+      const b = world.fuelBarrels[i];
+      const dx = satellite.x - b.x;
+      const dy = satellite.y - b.y;
+      if (dx * dx + dy * dy <= (b.r + 8) * (b.r + 8)) {
+        satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + BARREL_REFUEL);
+        world.fuelBarrels.splice(i, 1);
+      }
+    }
+  }
+
+  function step() {
+    if (satellite.crashed) return;
+    for (let i = 0; i < SUBSTEPS; i++) {
+      rk4Step();
+      checkCrash();
+      if (satellite.crashed) return;
+    }
+    checkBarrels();
+    updateAngle();
+    if (satellite.trail.length > 0) {
+      const last = satellite.trail[satellite.trail.length - 1];
+      const dx = satellite.x - last.x;
+      const dy = satellite.y - last.y;
+      if (dx * dx + dy * dy > 9) {
+        satellite.trail.push({ x: satellite.x, y: satellite.y });
+        if (satellite.trail.length > MAX_TRAIL) {
+          satellite.trail.shift();
+        }
+      }
+    } else {
+      satellite.trail.push({ x: satellite.x, y: satellite.y });
+    }
+  }
+
+  function speed() {
+    return Math.hypot(satellite.vx, satellite.vy);
+  }
+
+  function isCrashed() {
+    return satellite.crashed;
+  }
+
+  function getFuel() {
+    return satellite.fuel;
+  }
+
+  function getFuelMax() {
+    return FUEL_MAX;
+  }
+
+  function isThrusting() {
+    return satellite.thrustDir !== null && satellite.fuel > 0 && !satellite.crashed;
+  }
+
+  function getThrustDir() {
+    return satellite.thrustDir;
+  }
+
+  function getAngle() {
+    return satellite.angle;
+  }
+
+  function getFuelBarrels() {
+    return world.fuelBarrels;
+  }
+
+  function getWorld() {
+    return world;
+  }
+
+  function getSatellite() {
+    return satellite;
+  }
+
+  return {
+    DT,
+    init,
+    randomizePlanets,
+    placeSatellite,
+    resetSatellite,
+    thrust,
+    setThrustDir,
+    step,
+    speed,
+    isCrashed,
+    getFuel,
+    getFuelMax,
+    isThrusting,
+    getThrustDir,
+    getAngle,
+    getFuelBarrels,
+    getWorld,
+    getSatellite,
+    STORAGE_KEY,
+  };
+})();
+
+'use strict';
+
+(() => {
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+
+  const world = SIM.getWorld();
+  const sat = SIM.getSatellite();
+
+  const camera = {
+    x: world.width / 2,
+    y: world.height / 2,
+    zoom: 1,
+  };
+
+  let showTrail = true;
+  let placing = null;
+  const keysDown = new Set();
+  const particles = [];
+
+  const MIN_ZOOM = 0.05;
+  const MAX_ZOOM = 20;
+  const PARTICLE_LIFE = 30;
+  const PARTICLE_COUNT_PER_FRAME = 3;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function fitCamera() {
+    const dpr = 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    if (w <= 0 || h <= 0) return;
+    camera.zoom = Math.min(w / world.width, h / world.height);
+    camera.x = world.width / 2;
+    camera.y = world.height / 2;
+  }
+
+  function toScreen(px, py) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    return {
+      x: (px - camera.x) * camera.zoom + w / 2,
+      y: (py - camera.y) * camera.zoom + h / 2,
+    };
+  }
+
+  function toWorld(sx, sy) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    return {
+      x: (sx - w / 2) / camera.zoom + camera.x,
+      y: (sy - h / 2) / camera.zoom + camera.y,
+    };
+  }
+
+  // Star field generated procedurally on the visible screen range.
+  // Density is constant in world units (1 star per ~55 world-units), so the
+  // background covers the whole screen at any zoom. When zoomed in so far that
+  // the grid places fewer than MIN_STARS, the remaining visible area is filled
+  // with extra stars so the sky never looks empty.
+  const STAR_SPACING = 55;
+  const MIN_STARS = 60;
+  function hash2(ix, iy) {
+    let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  }
+
+  function drawStars() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    const topLeft = toWorld(0, 0);
+    const bottomRight = toWorld(w, h);
+    const pad = STAR_SPACING;
+    const minX = topLeft.x - pad;
+    const maxX = bottomRight.x + pad;
+    const minY = topLeft.y - pad;
+    const maxY = bottomRight.y + pad;
+    const step = STAR_SPACING;
+    const stars = [];
+    for (let ix = Math.floor(minX / step); ix * step <= maxX; ix++) {
+      for (let iy = Math.floor(minY / step); iy * step <= maxY; iy++) {
+        const n = hash2(ix, iy);
+        if (n > 0.72) continue;
+        const ox = (hash2(ix * 3 + 1, iy * 7 + 2) - 0.5) * step;
+        const oy = (hash2(ix * 5 + 3, iy * 11 + 4) - 0.5) * step;
+        const wx = ix * step + ox;
+        const wy = iy * step + oy;
+        const p = toScreen(wx, wy);
+        if (p.x < -2 || p.x > w + 2 || p.y < -2 || p.y > h + 2) continue;
+        const radius = 0.5 + hash2(ix * 13 + 5, iy * 17 + 6) * 1.2;
+        const alpha = 0.25 + hash2(ix * 19 + 7, iy * 23 + 8) * 0.65;
+        stars.push({ x: p.x, y: p.y, r: radius, a: alpha });
+      }
+    }
+    // Fill with extra stars if the grid produced too few (deep zoom-in)
+    if (stars.length < MIN_STARS) {
+      const need = MIN_STARS - stars.length;
+      for (let i = 0; i < need; i++) {
+        const n1 = hash2(1000 + i, 7);
+        const n2 = hash2(2000 + i, 13);
+        const n3 = hash2(3000 + i, 19);
+        const n4 = hash2(4000 + i, 23);
+        const n5 = hash2(5000 + i, 29);
+        stars.push({
+          x: n1 * w,
+          y: n2 * h,
+          r: 0.5 + n3 * 1.2,
+          a: 0.25 + n4 * 0.65,
+        });
+      }
+    }
+    ctx.fillStyle = '#ffffff';
+    for (const s of stars) {
+      ctx.globalAlpha = s.a;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFuelBarrels() {
+    const barrels = SIM.getFuelBarrels();
+    for (const b of barrels) {
+      const c = toScreen(b.x, b.y);
+      const r = b.r * camera.zoom;
+      if (c.x < -r - 20 || c.x > canvas.width / (window.devicePixelRatio || 1) + r + 20 ||
+          c.y < -r - 20 || c.y > canvas.height / (window.devicePixelRatio || 1) + r + 20) {
+        continue;
+      }
+      // Barrel body: circle with a lightning bolt icon inside
+      ctx.fillStyle = 'rgba(30, 60, 120, 0.6)';
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(120, 180, 255, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Lightning bolt: a zigzag path inside the barrel
+      const s = r * 0.6;
+      ctx.fillStyle = '#ffe060';
+      ctx.beginPath();
+      ctx.moveTo(c.x + s * 0.1, c.y - s * 0.7);
+      ctx.lineTo(c.x - s * 0.3, c.y + s * 0.1);
+      ctx.lineTo(c.x + s * 0.1, c.y + s * 0.1);
+      ctx.lineTo(c.x - s * 0.1, c.y + s * 0.7);
+      ctx.lineTo(c.x + s * 0.4, c.y - s * 0.1);
+      ctx.lineTo(c.x + s * 0.0, c.y - s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  function drawPlanets() {
+    for (const p of world.planets) {
+      const c = toScreen(p.x, p.y);
+      const r = p.r * camera.zoom;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  function drawTrail() {
+    if (!showTrail || sat.trail.length < 2) return;
+    ctx.strokeStyle = 'rgba(120, 220, 255, 0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const first = toScreen(sat.trail[0].x, sat.trail[0].y);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < sat.trail.length; i++) {
+      const p = toScreen(sat.trail[i].x, sat.trail[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  function drawSatellite() {
+    const c = toScreen(sat.x, sat.y);
+    const a = SIM.getAngle();
+    const size = 10;
+    // Nose triangle pointing in the heading direction
+    const noseX = c.x + Math.cos(a) * size;
+    const noseY = c.y + Math.sin(a) * size;
+    const leftX = c.x + Math.cos(a + Math.PI * 0.8) * size * 0.7;
+    const leftY = c.y + Math.sin(a + Math.PI * 0.8) * size * 0.7;
+    const rightX = c.x + Math.cos(a - Math.PI * 0.8) * size * 0.7;
+    const rightY = c.y + Math.sin(a - Math.PI * 0.8) * size * 0.7;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(noseX, noseY);
+    ctx.lineTo(leftX, leftY);
+    ctx.lineTo(rightX, rightY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, size + 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  function drawPlacementArrow() {
+    if (!placing) return;
+    const s = toScreen(placing.x, placing.y);
+    const e = toScreen(placing.ex, placing.ey);
+    ctx.strokeStyle = 'rgba(255, 210, 90, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(e.x, e.y);
+    ctx.stroke();
+    const dx = e.x - s.x;
+    const dy = e.y - s.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 4) {
+      const ux = dx / len;
+      const uy = dy / len;
+      ctx.fillStyle = 'rgba(255, 210, 90, 0.9)';
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y);
+      ctx.lineTo(e.x - ux * 10 - uy * 5, e.y - uy * 10 + ux * 5);
+      ctx.lineTo(e.x - ux * 10 + uy * 5, e.y - uy * 10 - ux * 5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255, 210, 90, 0.9)';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawCrashMarker() {
+    if (!sat.crashed || !sat.crashedPlanet) return;
+    const p = sat.crashedPlanet;
+    const c = toScreen(p.x, p.y);
+    ctx.fillStyle = 'rgba(255, 90, 60, 0.35)';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, p.r * camera.zoom + 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 120, 80, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, p.r * camera.zoom + 6, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Compute the combined thrust direction from held arrow keys in the
+  // satellite's local coordinate frame, rotated into world coordinates by
+  // the current heading (nose angle).
+  // Local frame: +x = forward (nose direction), +y = right (starboard).
+  // Screen y grows downward, so the rotation from local to world is:
+  //   world_x = lx * cos a - ly * sin a
+  //   world_y = lx * sin a + ly * cos a
+  //   (a = heading angle, nose points along world (cos a, sin a))
+  // Arrow keys map to local frame:
+  //   ArrowUp    = forward  = local (+1, 0)
+  //   ArrowDown  = backward = local (-1, 0)
+  //   ArrowLeft  = left     = local (0, -1)
+  //   ArrowRight = right    = local (0, +1)
+  // Check: ArrowUp at a=0 (nose along +x): world = (1, 0) = +x  ✓ (forward)
+  //        ArrowUp at a=PI/2 (nose along +y): world = (0, 1) = +y  ✓ (forward)
+  //        ArrowRight at a=0: local (0,1) → world = (-1, 0)?? No:
+  //          world_x = 0*cos0 - 1*sin0 = 0, world_y = 0*sin0 + 1*cos0 = 1 → (0,1)
+  //          But nose is +x, right of nose should be +y (down). ✓
+  function currentThrustDir() {
+    let lx = 0;
+    let ly = 0;
+    if (keysDown.has('ArrowUp')) lx += 1;
+    if (keysDown.has('ArrowDown')) lx -= 1;
+    if (keysDown.has('ArrowLeft')) ly -= 1;
+    if (keysDown.has('ArrowRight')) ly += 1;
+    const len = Math.hypot(lx, ly);
+    if (len < 1e-9) return null;
+    const nlx = lx / len;
+    const nly = ly / len;
+    const a = SIM.getAngle();
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const wx = nlx * cos - nly * sin;
+    const wy = nlx * sin + nly * cos;
+    return { x: wx, y: wy };
+  }
+
+  function emitThrustParticles() {
+    if (!SIM.isThrusting()) {
+      particles.length = 0;
+      return;
+    }
+    // thrustDir stores the exhaust direction (opposite to acceleration)
+    const dir = SIM.getThrustDir();
+    const c = toScreen(sat.x, sat.y);
+    const ex = dir.x;
+    const ey = dir.y;
+    for (let i = 0; i < PARTICLE_COUNT_PER_FRAME; i++) {
+      const spread = (Math.random() - 0.5) * 0.6;
+      const cos = Math.cos(spread);
+      const sin = Math.sin(spread);
+      const px = ex * cos - ey * sin;
+      const py = ex * sin + ey * cos;
+      const speed = (1.5 + Math.random() * 2.5) * camera.zoom;
+      particles.push({
+        x: c.x + ex * 12,
+        y: c.y + ey * 12,
+        vx: px * speed,
+        vy: py * speed,
+        life: PARTICLE_LIFE,
+      });
+    }
+  }
+
+  function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+      p.life--;
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+      }
+    }
+  }
+
+  function drawParticles() {
+    if (particles.length === 0) return;
+    for (const p of particles) {
+      const t = p.life / PARTICLE_LIFE;
+      const r = 2 + (1 - t) * 3;
+      const alpha = t * 0.9;
+      const hue = 20 + t * 30;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'hsl(' + hue + ', 100%, ' + (50 + t * 20) + '%)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFuelBar() {
+    const fuel = SIM.getFuel();
+    const max = SIM.getFuelMax();
+    const frac = max > 0 ? fuel / max : 0;
+    const barW = 160;
+    const barH = 14;
+    const x = 16;
+    const y = 56;
+    ctx.fillStyle = 'rgba(10, 18, 35, 0.85)';
+    ctx.fillRect(x - 2, y - 2, barW + 4, barH + 4);
+    ctx.strokeStyle = 'rgba(90, 130, 200, 0.7)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x - 2, y - 2, barW + 4, barH + 4);
+    const fillColor = frac > 0.5 ? '#5fd68a' : frac > 0.2 ? '#e8c84b' : '#e0604a';
+    ctx.fillStyle = fillColor;
+    ctx.fillRect(x, y, barW * frac, barH);
+    ctx.fillStyle = 'rgba(220, 235, 255, 0.9)';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText('Топливо: ' + Math.round(fuel) + '%', x, y - 6);
+  }
+
+  function drawHud() {
+    const speed = SIM.speed();
+    ctx.font = '13px system-ui, sans-serif';
+    if (sat.crashed) {
+      ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
+      ctx.fillText('Спутник упал на планету — полёт завершён. Кнопка «Сброс полёта» или новая установка мышью.', 16, window.innerHeight - 16);
+    } else {
+      ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
+      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с', 16, window.innerHeight - 16);
+    }
+    drawFuelBar();
+  }
+
+  function frame() {
+    if (!sat.crashed) {
+      const dir = currentThrustDir();
+      if (dir) {
+        SIM.thrust(dir.x, dir.y);
+      } else {
+        SIM.setThrustDir(null);
+      }
+      SIM.step();
+    } else {
+      SIM.setThrustDir(null);
+    }
+    emitThrustParticles();
+    updateParticles();
+    ctx.fillStyle = '#04060d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawStars();
+    drawTrail();
+    drawFuelBarrels();
+    drawPlanets();
+    if (sat.crashed) {
+      drawCrashMarker();
+    } else {
+      drawSatellite();
+    }
+    drawParticles();
+    drawPlacementArrow();
+    drawHud();
+    requestAnimationFrame(frame);
+  }
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const before = toWorld(e.offsetX, e.offsetY);
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    camera.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, camera.zoom * factor));
+    const after = toWorld(e.offsetX, e.offsetY);
+    camera.x += before.x - after.x;
+    camera.y += before.y - after.y;
+  }, { passive: false });
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const w = toWorld(e.offsetX, e.offsetY);
+    placing = { x: w.x, y: w.y, ex: w.x, ey: w.y };
+    canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!placing) return;
+    const w = toWorld(e.offsetX, e.offsetY);
+    placing.ex = w.x;
+    placing.ey = w.y;
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (!placing || e.button !== 0) return;
+    const vx = (placing.ex - placing.x) * 2;
+    const vy = (placing.ey - placing.y) * 2;
+    SIM.placeSatellite(placing.x, placing.y, vx, vy);
+    placing = null;
+  });
+
+  const btnTrail = document.getElementById('btnTrail');
+  btnTrail.addEventListener('click', () => {
+    showTrail = !showTrail;
+    btnTrail.classList.toggle('active', showTrail);
+    btnTrail.textContent = showTrail ? 'След: да' : 'След: нет';
+  });
+
+  document.getElementById('btnReset').addEventListener('click', () => {
+    SIM.resetSatellite();
+  });
+
+  document.getElementById('btnPlanets').addEventListener('click', () => {
+    SIM.randomizePlanets();
+  });
+
+  document.getElementById('btnZoomIn').addEventListener('click', () => {
+    camera.zoom = Math.min(MAX_ZOOM, camera.zoom * 1.4);
+  });
+
+  document.getElementById('btnZoomOut').addEventListener('click', () => {
+    camera.zoom = Math.max(MIN_ZOOM, camera.zoom / 1.4);
+  });
+
+  window.addEventListener('resize', resize);
+
+  window.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      e.preventDefault();
+      keysDown.add(e.key);
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      keysDown.delete(e.key);
+    }
+  });
+
+  window.addEventListener('blur', () => {
+    keysDown.clear();
+  });
+
+  resize();
+  fitCamera();
+  SIM.init();
+  requestAnimationFrame(frame);
+})();
+
+</script>

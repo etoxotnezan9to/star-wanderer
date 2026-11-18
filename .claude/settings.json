@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "ask": [
+      "Agent",
+      "Workflow",
+      "RemoteTrigger",
+      "Bash(claude *)",
+      "PowerShell(claude *)"
+    ]
+  }
+}

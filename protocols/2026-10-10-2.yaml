@@ -1,0 +1,176 @@
+что проверено: настройка площадки попыткой (AGENTS.md, 6.6)
+репозиторий: tmi/branch-kit
+площадка: http://192.168.145.144
+кто: root (запуск владельцем; подпись пробных изменений — aocheretko)
+подтверждено: дословными ответами площадки в выводе средства; правила защиты и вершины веток сверены постановщиком по API 10.10.2026 21:48; GitLab 17.11.2
+когда: 2026-10-10, 21:47–21:47
+средство: owner_check_settings.py, комплект http://192.168.145.144/tmi/branch-kit.git,
+  изменение d878843c; вершина клона d878843c
+вершина основной ветки: d878843c7dcb99fd48f502337b5cc078ea014dc4
+ключи:
+  - ключ: --developer-key
+    чей: автора
+    учётная запись: claude-dev
+    в проекте: Developer (30)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+  - ключ: --maintainer-key
+    чей: проверяющего
+    учётная запись: claude-reviewer
+    в проекте: Maintainer (40)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+  - ключ: --planner-key
+    чей: постановщика
+    учётная запись: ai-reader
+    в проекте: Reporter (20)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+правила защиты:
+  получено: '2026-10-10 21:47:07'
+  ветки:
+    - ветка: main
+      отправка: No one
+      слияние: Maintainers
+      принудительная отправка: false
+    - ветка: docs/*
+      отправка: Developers + Maintainers
+      слияние: Developers + Maintainers
+      принудительная отправка: false
+    - ветка: feat/*
+      отправка: Developers + Maintainers
+      слияние: Developers + Maintainers
+      принудительная отправка: false
+    - ветка: fix/*
+      отправка: Developers + Maintainers
+      слияние: Developers + Maintainers
+      принудительная отправка: false
+    - ветка: chore/*
+      отправка: Developers + Maintainers
+      слияние: Developers + Maintainers
+      принудительная отправка: false
+    - ветка: test/*
+      отправка: Developers + Maintainers
+      слияние: Developers + Maintainers
+      принудительная отправка: false
+пробная ветка:
+  ветка: test/settings-check-2026-10-10-2
+  правило защиты: test/*
+  пробное изменение: 19d5cef234e420de4533b9578e009ad78c334905, пустое, поверх
+    вершины main; подпись — aocheretko
+  копия: 'снималась перед каждой попыткой; не понадобилась: ни одна попытка
+    не изменила ветки'
+пробный запрос: '!6, закрыт после попытки з)'
+попытки:
+  - попытка: а) отправка в основную ветку main
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:47:08'
+    команда: git push -o ci.skip origin 9ee37114:main
+    ожидается: отказ; засчитывается ответ «not allowed to push code to protected
+      branches»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to push code to protected branches
+        on this project.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] 9ee371144a4d3217fe4e20629d5114155aa488d0 -> main
+        (pre-receive hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: б) принудительная отправка в основную ветку main
+    ключ: проверяющего
+    учётная запись: claude-reviewer
+    когда: '21:47:09'
+    команда: git push -o ci.skip --force-with-lease=main:d878843c origin 15ab91ef:main
+    ожидается: отказ; засчитывается ответ «not allowed to force push code
+      to a protected branch»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to force push code to a protected
+        branch on this project.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] 15ab91ef43ca60efbbf0471e72d16b52b840eb0d -> main
+        (pre-receive hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: в) отправка пробной ветки test/settings-check-2026-10-10-2
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:47:10'
+    команда: git push -o ci.skip origin 19d5cef2:test/settings-check-2026-10-10-2
+    ожидается: проходит
+    код: 0
+    ответ площадки:
+      - 'remote: To create a merge request for test/settings-check-2026-10-10-2,
+        visit:'
+      - 'remote:   http://mygitlab.local/tmi/branch-kit/-/merge_requests/new?merge_request%5Bsource_branch%5D=test%2Fsettings-check-2026-10-10-2'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '* [new branch]      19d5cef234e420de4533b9578e009ad78c334905 -> test/settings-check-2026-10-10-2'
+    исход: прошла — как ожидалось
+  - попытка: г) принудительная отправка в пробную ветку
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:47:11'
+    команда: git push -o ci.skip --force-with-lease=test/settings-check-2026-10-10-2:19d5cef2
+      origin afd2c3ea:test/settings-check-2026-10-10-2
+    ожидается: отказ; засчитывается ответ «not allowed to force push code
+      to a protected branch»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to force push code to a protected
+        branch on this project.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] afd2c3ea658eba62bc5ff99b911484422ef72ad8 -> test/settings-check-2026-10-10-2
+        (pre-receive hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: д) удаление пробной ветки
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:47:13'
+    команда: git push -o ci.skip --force-with-lease=test/settings-check-2026-10-10-2:19d5cef2
+      origin --delete test/settings-check-2026-10-10-2
+    ожидается: отказ; засчитывается ответ «not allowed to delete protected
+      branches»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to delete protected branches
+        from this project. Only a project maintainer or owner can delete a
+        protected branch.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] test/settings-check-2026-10-10-2 (pre-receive
+        hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: е) отправка в пробную ветку
+    ключ: постановщика
+    учётная запись: ai-reader
+    когда: '21:47:14'
+    команда: git push -o ci.skip origin dd82fea0:test/settings-check-2026-10-10-2
+    ожидается: отказ; засчитывается ответ «not allowed to push code»
+    код: 128
+    ответ площадки:
+      - 'remote: You are not allowed to push code to this project.'
+      - 'fatal: unable to access ''http://192.168.145.144/tmi/branch-kit.git/'':
+        The requested URL returned error: 403'
+    исход: отказ — как ожидалось
+  - попытка: ж) заметка в запросе из пробной ветки
+    ключ: постановщика
+    учётная запись: ai-reader
+    когда: '21:47:14'
+    команда: POST merge_requests/6/notes
+    ожидается: проходит
+    код: 201
+    ответ площадки:
+      - заметка 7418 создана
+    исход: прошла — как ожидалось
+  - попытка: з) слияние запроса из пробной ветки
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:47:15'
+    команда: PUT merge_requests/6/merge
+    ожидается: отказ; засчитывается код ответа 401 или 403
+    код: 401
+    ответ площадки:
+      - 'PUT projects/tmi%2Fbranch-kit/merge_requests/6/merge: 401 401 Unauthorized'
+    исход: отказ — как ожидалось; запрос !6 закрыт
+итог: всё как ожидалось; отказ — как ожидалось — а), б), г), д), е), з); прошла
+  — как ожидалось — в), ж)

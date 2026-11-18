@@ -1,0 +1,153 @@
+что проверено: настройка площадки попыткой (AGENTS.md, 6.6)
+репозиторий: tmi/branch-kit
+площадка: http://192.168.145.144
+кто: root (запуск владельцем; подпись пробных изменений — aocheretko)
+подтверждено: дословными ответами площадки в выводе средства; правила защиты и вершины веток сверены постановщиком по API 10.10.2026 21:48; GitLab 17.11.2
+когда: 2026-10-10, 21:45–21:45
+средство: owner_check_settings.py, комплект http://192.168.145.144/tmi/branch-kit.git,
+  изменение d878843c; вершина клона d878843c
+вершина основной ветки: d878843c7dcb99fd48f502337b5cc078ea014dc4
+ключи:
+  - ключ: --developer-key
+    чей: автора
+    учётная запись: claude-dev
+    в проекте: Developer (30)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+  - ключ: --maintainer-key
+    чей: проверяющего
+    учётная запись: claude-reviewer
+    в проекте: Maintainer (40)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+  - ключ: --planner-key
+    чей: постановщика
+    учётная запись: ai-reader
+    в проекте: Reporter (20)
+    администратор: 'нет: настройки площадки ключу не видны (403)'
+правила защиты:
+  получено: '2026-10-10 21:45:29'
+  ветки:
+    - ветка: main
+      отправка: No one
+      слияние: Maintainers
+      принудительная отправка: false
+пробная ветка:
+  ветка: test/settings-check-2026-10-10
+  правило защиты: нет
+  пробное изменение: c432a9539034710973916c70be4e32f5cb7ba163, пустое, поверх
+    вершины main; подпись — aocheretko
+  копия: 'снималась перед каждой попыткой; понадобилась: возвращены из копии
+    — test/settings-check-2026-10-10'
+пробный запрос: '!5, закрыт после попытки з)'
+попытки:
+  - попытка: а) отправка в основную ветку main
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:45:30'
+    команда: git push -o ci.skip origin a06acc7f:main
+    ожидается: отказ; засчитывается ответ «not allowed to push code to protected
+      branches»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to push code to protected branches
+        on this project.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] a06acc7f1d884da75f40f12b848df07c38a4a8c8 -> main
+        (pre-receive hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: б) принудительная отправка в основную ветку main
+    ключ: проверяющего
+    учётная запись: claude-reviewer
+    когда: '21:45:32'
+    команда: git push -o ci.skip --force-with-lease=main:d878843c origin d654ab3f:main
+    ожидается: отказ; засчитывается ответ «not allowed to force push code
+      to a protected branch»
+    код: 1
+    ответ площадки:
+      - 'remote: GitLab: You are not allowed to force push code to a protected
+        branch on this project.'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '! [remote rejected] d654ab3f88adc4b98f9e87c88bb2760156061716 -> main
+        (pre-receive hook declined)'
+      - 'error: failed to push some refs to ''http://192.168.145.144/tmi/branch-kit.git'''
+    исход: отказ — как ожидалось
+  - попытка: в) отправка пробной ветки test/settings-check-2026-10-10
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:45:33'
+    команда: git push -o ci.skip origin c432a953:test/settings-check-2026-10-10
+    ожидается: проходит
+    код: 0
+    ответ площадки:
+      - 'remote: To create a merge request for test/settings-check-2026-10-10,
+        visit:'
+      - 'remote:   http://mygitlab.local/tmi/branch-kit/-/merge_requests/new?merge_request%5Bsource_branch%5D=test%2Fsettings-check-2026-10-10'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '* [new branch]      c432a9539034710973916c70be4e32f5cb7ba163 -> test/settings-check-2026-10-10'
+    исход: прошла — как ожидалось
+  - попытка: г) принудительная отправка в пробную ветку
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:45:34'
+    команда: git push -o ci.skip --force-with-lease=test/settings-check-2026-10-10:c432a953
+      origin 8dca51c2:test/settings-check-2026-10-10
+    ожидается: отказ; засчитывается ответ «not allowed to force push code
+      to a protected branch»
+    код: 0
+    ответ площадки:
+      - 'remote: To create a merge request for test/settings-check-2026-10-10,
+        visit:'
+      - 'remote:   http://mygitlab.local/tmi/branch-kit/-/merge_requests/new?merge_request%5Bsource_branch%5D=test%2Fsettings-check-2026-10-10'
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - + c432a95...8dca51c 8dca51c2d7561f4e805616ff10175e8a544116a3 -> test/settings-check-2026-10-10
+        (forced update)
+    исход: ПРОШЛА — НЕ КАК ОЖИДАЛОСЬ; ветка test/settings-check-2026-10-10
+      возвращена из копии на c432a953
+  - попытка: д) удаление пробной ветки
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:45:36'
+    команда: git push -o ci.skip --force-with-lease=test/settings-check-2026-10-10:c432a953
+      origin --delete test/settings-check-2026-10-10
+    ожидается: отказ; засчитывается ответ «not allowed to delete protected
+      branches»
+    код: 0
+    ответ площадки:
+      - To http://192.168.145.144/tmi/branch-kit.git
+      - '- [deleted]         test/settings-check-2026-10-10'
+    исход: ПРОШЛА — НЕ КАК ОЖИДАЛОСЬ; ветка test/settings-check-2026-10-10
+      возвращена из копии на c432a953
+  - попытка: е) отправка в пробную ветку
+    ключ: постановщика
+    учётная запись: ai-reader
+    когда: '21:45:38'
+    команда: git push -o ci.skip origin 68236cbe:test/settings-check-2026-10-10
+    ожидается: отказ; засчитывается ответ «not allowed to push code»
+    код: 128
+    ответ площадки:
+      - 'remote: You are not allowed to push code to this project.'
+      - 'fatal: unable to access ''http://192.168.145.144/tmi/branch-kit.git/'':
+        The requested URL returned error: 403'
+    исход: отказ — как ожидалось
+  - попытка: ж) заметка в запросе из пробной ветки
+    ключ: постановщика
+    учётная запись: ai-reader
+    когда: '21:45:39'
+    команда: POST merge_requests/5/notes
+    ожидается: проходит
+    код: 201
+    ответ площадки:
+      - заметка 7417 создана
+    исход: прошла — как ожидалось
+  - попытка: з) слияние запроса из пробной ветки
+    ключ: автора
+    учётная запись: claude-dev
+    когда: '21:45:40'
+    команда: PUT merge_requests/5/merge
+    ожидается: отказ; засчитывается код ответа 401 или 403
+    код: 401
+    ответ площадки:
+      - 'PUT projects/tmi%2Fbranch-kit/merge_requests/5/merge: 401 401 Unauthorized'
+    исход: отказ — как ожидалось; запрос !5 закрыт
+итог: расхождений 2; отказ — как ожидалось — а), б), е), з); прошла — как
+  ожидалось — в), ж); ПРОШЛА — НЕ КАК ОЖИДАЛОСЬ — г), д)

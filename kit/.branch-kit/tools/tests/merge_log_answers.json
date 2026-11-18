@@ -1,0 +1,44 @@
+{
+ "_": "Записанные ответы площадки для check_merge_log.py: журнал основной ветки example/app с одним нарушением каждого вида, сокращённый до полей, которые читает средство, с выдуманными именами. Нарушения: 33333333 — изменение не слиянием; !3 — слил автор; !4 — новое решение без утверждения владельца; !5 — исполнение решения без следа (заметка владельца — системная); !6 — повторная ветка docs/first; !7 — нет раздела «Решения»; !11 — изменения слияния нет на первой линии. Остальное чисто: !1 утверждён владельцем, у !8 — заметка владельца, !9 ссылается на !1, начальное изменение 00000000 не проверяется, изменение a1111111 не на первой линии, запрос !10 слит не в основную ветку.",
+ "head": "9999999999999999999999999999999999999999",
+ "commits": [
+  {"id": "9999999999999999999999999999999999999999", "parent_ids": ["8888888888888888888888888888888888888888", "a999999999999999999999999999999999999999"], "title": "Merge branch 'docs/ref-trace' into 'main'"},
+  {"id": "8888888888888888888888888888888888888888", "parent_ids": ["7777777777777777777777777777777777777777", "a888888888888888888888888888888888888888"], "title": "Merge branch 'docs/owner-note' into 'main'"},
+  {"id": "7777777777777777777777777777777777777777", "parent_ids": ["6666666666666666666666666666666666666666", "a777777777777777777777777777777777777777"], "title": "Merge branch 'docs/no-section' into 'main'"},
+  {"id": "6666666666666666666666666666666666666666", "parent_ids": ["5555555555555555555555555555555555555555", "a666666666666666666666666666666666666666"], "title": "Merge branch 'docs/first' into 'main'"},
+  {"id": "5555555555555555555555555555555555555555", "parent_ids": ["4444444444444444444444444444444444444444", "a555555555555555555555555555555555555555"], "title": "Merge branch 'docs/no-trace' into 'main'"},
+  {"id": "4444444444444444444444444444444444444444", "parent_ids": ["3333333333333333333333333333333333333333", "a444444444444444444444444444444444444444"], "title": "Merge branch 'docs/no-approval' into 'main'"},
+  {"id": "3333333333333333333333333333333333333333", "parent_ids": ["dddddddddddddddddddddddddddddddddddddddd"], "title": "правка прямо в основную ветку"},
+  {"id": "dddddddddddddddddddddddddddddddddddddddd", "parent_ids": ["2222222222222222222222222222222222222222", "a333333333333333333333333333333333333333"], "title": "Merge branch 'docs/self-merge' into 'main'"},
+  {"id": "2222222222222222222222222222222222222222", "parent_ids": ["1111111111111111111111111111111111111111", "a222222222222222222222222222222222222222"], "title": "Merge branch 'docs/first' into 'main'"},
+  {"id": "1111111111111111111111111111111111111111", "parent_ids": ["0000000000000000000000000000000000000000", "a111111111111111111111111111111111111111"], "title": "Merge branch 'docs/new-approved' into 'main'"},
+  {"id": "a111111111111111111111111111111111111111", "parent_ids": ["0000000000000000000000000000000000000000"], "title": "docs: изменение ветки задачи, не на первой линии"},
+  {"id": "0000000000000000000000000000000000000000", "parent_ids": [], "title": "Initial commit"}
+ ],
+ "merge_requests": [
+  {"iid": 1, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "1111111111111111111111111111111111111111", "source_branch": "docs/new-approved", "target_branch": "main", "merged_at": "2026-10-01T10:00:00.000Z", "description": "Модель автора: пример\n\n## Решения\n\n<!-- Оставьте ровно один вариант из трёх, остальные удалите.\n- решений не несёт -->\n\n- несёт новое решение: правило — нужно утверждение владельца\n\n## Чем проверено\n\n- решений не несёт\n"},
+  {"iid": 2, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "2222222222222222222222222222222222222222", "source_branch": "docs/first", "target_branch": "main", "merged_at": "2026-10-01T11:00:00.000Z", "description": "## Решения\r\n\r\n- решений не несёт\r\n"},
+  {"iid": 3, "author": "ai-dev", "merged_by": "ai-dev", "merge_commit_sha": "dddddddddddddddddddddddddddddddddddddddd", "source_branch": "docs/self-merge", "target_branch": "main", "merged_at": "2026-10-01T12:00:00.000Z", "description": "## Решения\n\n- решений не несёт\n"},
+  {"iid": 4, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "4444444444444444444444444444444444444444", "source_branch": "docs/no-approval", "target_branch": "main", "merged_at": "2026-10-02T10:00:00.000Z", "description": "## Решения\n\n- несёт новое решение: документ — нужно утверждение владельца\n"},
+  {"iid": 5, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "5555555555555555555555555555555555555555", "source_branch": "docs/no-trace", "target_branch": "main", "merged_at": "2026-10-02T11:00:00.000Z", "description": "## Решения\n\n- исполняет решение владельца от 01.10.2026: пересказ решения\n"},
+  {"iid": 6, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "6666666666666666666666666666666666666666", "source_branch": "docs/first", "target_branch": "main", "merged_at": "2026-10-02T12:00:00.000Z", "description": "## Решения\n\n- решений не несёт\n"},
+  {"iid": 7, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "7777777777777777777777777777777777777777", "source_branch": "docs/no-section", "target_branch": "main", "merged_at": "2026-10-03T10:00:00.000Z", "description": "## Что и зачем\n\nописание без раздела\n"},
+  {"iid": 8, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "8888888888888888888888888888888888888888", "source_branch": "docs/owner-note", "target_branch": "main", "merged_at": "2026-10-03T11:00:00.000Z", "description": "## Решения\n\n- исполняет решение владельца от 03.10.2026: решение дано заметкой в этом запросе\n"},
+  {"iid": 9, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "9999999999999999999999999999999999999999", "source_branch": "docs/ref-trace", "target_branch": "main", "merged_at": "2026-10-03T12:00:00.000Z", "description": "## Решения\n\n- исполняет решение владельца от 01.10.2026: след — утверждение запроса !1 (AGENTS.md, 2.5)\n"},
+  {"iid": 10, "author": "ai-dev", "merged_by": "ai-dev", "merge_commit_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "source_branch": "docs/other-target", "target_branch": "docs/other", "merged_at": "2026-10-03T13:00:00.000Z", "description": "слит не в основную ветку: средство его не проверяет\n"},
+  {"iid": 11, "author": "ai-dev", "merged_by": "ai-reviewer", "merge_commit_sha": "cccccccccccccccccccccccccccccccccccccccc", "source_branch": "docs/dropped", "target_branch": "main", "merged_at": "2026-10-03T14:00:00.000Z", "description": "## Решения\n\n- решений не несёт\n"}
+ ],
+ "approvals": {
+  "1": ["owner"],
+  "4": ["ai-reviewer"]
+ },
+ "notes": {
+  "5": [
+   {"author": "ai-reviewer", "system": false, "body": "сводка проверки"},
+   {"author": "owner", "system": true, "body": "mentioned in merge request !6"}
+  ],
+  "8": [
+   {"author": "owner", "system": false, "body": "решение: принять"}
+  ]
+ }
+}

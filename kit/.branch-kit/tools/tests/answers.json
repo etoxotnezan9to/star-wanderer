@@ -1,0 +1,108 @@
+{
+ "_": "Записанные ответы API площадки GitLab 17 (бесплатная редакция), сокращённые до полей, которые читают средства, с выдуманными именами. По ним поддельная площадка fake_api.py строит свои ответы.",
+ "user": {
+  "id": 21,
+  "username": "ai-dev",
+  "name": "AI Developer",
+  "state": "active",
+  "locked": false,
+  "web_url": "http://127.0.0.1/ai-dev"
+ },
+ "merge_request": {
+  "id": 301,
+  "iid": 12,
+  "project_id": 7,
+  "title": "Пример запроса",
+  "description": "Модель автора: пример",
+  "state": "opened",
+  "created_at": "2026-10-10T10:00:00.000Z",
+  "updated_at": "2026-10-10T10:00:00.000Z",
+  "merged_by": null,
+  "merge_user": null,
+  "merged_at": null,
+  "closed_by": null,
+  "closed_at": null,
+  "target_branch": "main",
+  "source_branch": "feat/example",
+  "user_notes_count": 0,
+  "author": {"id": 21, "username": "ai-dev", "name": "AI Developer"},
+  "draft": false,
+  "work_in_progress": false,
+  "merge_commit_sha": null,
+  "squash_commit_sha": null,
+  "sha": "0000000000000000000000000000000000000000",
+  "squash": false,
+  "web_url": "http://127.0.0.1/example/app/-/merge_requests/12"
+ },
+ "note": {
+  "id": 1000,
+  "type": null,
+  "body": "Модель проверяющего: пример",
+  "author": {"id": 22, "username": "ai-reviewer", "name": "AI Reviewer"},
+  "created_at": "2026-10-10T10:05:00.000Z",
+  "updated_at": "2026-10-10T10:05:00.000Z",
+  "system": false,
+  "noteable_id": 301,
+  "noteable_type": "MergeRequest",
+  "noteable_iid": 12,
+  "project_id": 7,
+  "resolvable": false,
+  "confidential": false,
+  "internal": false
+ },
+ "system_note": {
+  "id": 1001,
+  "type": null,
+  "body": "added 1 commit",
+  "author": {"id": 21, "username": "ai-dev", "name": "AI Developer"},
+  "created_at": "2026-10-10T10:06:00.000Z",
+  "updated_at": "2026-10-10T10:06:00.000Z",
+  "system": true,
+  "noteable_id": 301,
+  "noteable_type": "MergeRequest",
+  "noteable_iid": 12,
+  "project_id": 7,
+  "resolvable": false,
+  "confidential": false,
+  "internal": false
+ },
+ "approvals": {
+  "approved": false,
+  "approved_by": [],
+  "user_can_approve": false,
+  "user_has_approved": false
+ },
+ "project": {
+  "id": 7,
+  "path_with_namespace": "example/app",
+  "default_branch": "main",
+  "merge_method": "merge",
+  "squash_option": "never",
+  "remove_source_branch_after_merge": false,
+  "only_allow_merge_if_pipeline_succeeds": false,
+  "web_url": "http://127.0.0.1/example/app"
+ },
+ "protected_branch": {
+  "id": 11,
+  "name": "main",
+  "push_access_levels": [{"id": 21, "access_level": 0, "access_level_description": "No one", "user_id": null, "group_id": null, "deploy_key_id": null}],
+  "merge_access_levels": [{"id": 22, "access_level": 40, "access_level_description": "Maintainers", "user_id": null, "group_id": null}],
+  "unprotect_access_levels": [],
+  "allow_force_push": false,
+  "code_owner_approval_required": false
+ },
+ "member": {
+  "id": 21,
+  "username": "ai-dev",
+  "name": "AI Developer",
+  "state": "active",
+  "access_level": 30,
+  "created_at": "2026-10-10T10:00:00.000Z",
+  "expires_at": null
+ },
+ "application_settings": {
+  "id": 1,
+  "default_branch_protection": 2,
+  "signup_enabled": false
+ }
+}
