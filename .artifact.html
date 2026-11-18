@@ -616,17 +616,92 @@ const SIM = (() => {
     }
   }
 
+  // Parse a hex color like '#e8b04b' into {r, g, b} (0–255).
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
+  // Light source direction (world coords, normalized). Fixed to upper-left.
+  const LIGHT_X = -0.7;
+  const LIGHT_Y = -0.7;
+
   function drawPlanets() {
+    const dpr = window.devicePixelRatio || 1;
+    const screenW = canvas.width / dpr;
+    const screenH = canvas.height / dpr;
     for (const p of world.planets) {
       const c = toScreen(p.x, p.y);
       const r = p.r * camera.zoom;
-      ctx.fillStyle = p.color;
+      if (c.x < -r - 40 || c.x > screenW + r + 40 ||
+          c.y < -r - 40 || c.y > screenH + r + 40) continue;
+
+      const rgb = hexToRgb(p.color);
+
+      // 1. Base sphere: radial gradient with the lit side brighter.
+      //    Offset the gradient center toward the light source so the
+      //    illuminated hemisphere is lighter and the far side falls off.
+      const gx = c.x + LIGHT_X * r * 0.45;
+      const gy = c.y + LIGHT_Y * r * 0.45;
+      const grad = ctx.createRadialGradient(gx, gy, r * 0.1, c.x, c.y, r);
+      const lr = Math.min(255, rgb.r + 70);
+      const lg = Math.min(255, rgb.g + 70);
+      const lb = Math.min(255, rgb.b + 70);
+      grad.addColorStop(0, 'rgb(' + lr + ',' + lg + ',' + lb + ')');
+      grad.addColorStop(0.55, 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')');
+      const dr = Math.max(0, rgb.r - 90);
+      const dg = Math.max(0, rgb.g - 90);
+      const db = Math.max(0, rgb.b - 90);
+      grad.addColorStop(1, 'rgb(' + dr + ',' + dg + ',' + db + ')');
+      ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+
+      // 2. Specular highlight: a small bright spot on the lit side.
+      const hx = c.x + LIGHT_X * r * 0.55;
+      const hy = c.y + LIGHT_Y * r * 0.55;
+      const hs = r * 0.3;
+      const hgrad = ctx.createRadialGradient(hx, hy, 0, hx, hy, hs);
+      hgrad.addColorStop(0, 'rgba(255,255,255,0.55)');
+      hgrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hgrad;
+      ctx.beginPath();
+      ctx.arc(hx, hy, hs, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3. Atmosphere rim: a soft glow around the planet edge, stronger on
+      //    the lit side.
+      if (r > 20) {
+        const atmo = ctx.createRadialGradient(c.x, c.y, r * 0.92, c.x, c.y, r * 1.15);
+        atmo.addColorStop(0, 'rgba(' + lr + ',' + lg + ',' + lb + ',0)');
+        atmo.addColorStop(0.5, 'rgba(' + lr + ',' + lg + ',' + lb + ',0.12)');
+        atmo.addColorStop(1, 'rgba(' + lr + ',' + lg + ',' + lb + ',0)');
+        ctx.fillStyle = atmo;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, r * 1.15, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 4. Terminator shadow: darken the side away from the light with a
+      //    linear gradient perpendicular to the light direction.
+      const lx = -LIGHT_X;
+      const ly = -LIGHT_Y;
+      const llen = Math.hypot(lx, ly);
+      const nx = lx / llen;
+      const ny = ly / llen;
+      const shStartX = c.x + nx * r;
+      const shStartY = c.y + ny * r;
+      const shEndX = c.x - nx * r * 0.3;
+      const shEndY = c.y - ny * r * 0.3;
+      const shadow = ctx.createLinearGradient(shStartX, shStartY, shEndX, shEndY);
+      shadow.addColorStop(0, 'rgba(0,0,0,0)');
+      shadow.addColorStop(0.4, 'rgba(0,0,0,0.15)');
+      shadow.addColorStop(1, 'rgba(0,0,0,0.45)');
+      ctx.fillStyle = shadow;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
