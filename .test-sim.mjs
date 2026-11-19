@@ -83,16 +83,16 @@ check('satellite moves in direction of net gravity (angle within 20 deg)',
 check('satellite actually moved (non-zero)', Math.abs(movedX) + Math.abs(movedY) > 1e-9);
 
 SIM.placeSatellite(500, 400, 10, -5);
-const s0 = SIM.getSatellite();
-const snap = { x: s0.x, y: s0.y, vx: s0.vx, vy: s0.vy };
 for (let i = 0; i < 60; i++) SIM.step();
 SIM.resetSatellite();
 const s = SIM.getSatellite();
-check('reset returns to placed start position and velocity',
-  Math.abs(s.x - snap.x) < 1e-9 && Math.abs(s.y - snap.y) < 1e-9 &&
-  Math.abs(s.vx - snap.vx) < 1e-9 && Math.abs(s.vy - snap.vy) < 1e-9);
+// resetSatellite now always launches from the fixed position (1000, 1100, 0, -80)
+check('reset launches from fixed position (1000, 1100)',
+  Math.abs(s.x - 1000) < 1e-9 && Math.abs(s.y - 1100) < 1e-9);
+check('reset launches with fixed velocity (0, -80)',
+  Math.abs(s.vx - 0) < 1e-9 && Math.abs(s.vy - (-80)) < 1e-9);
 
-check('speed() matches |v|', Math.abs(SIM.speed() - Math.hypot(snap.vx, snap.vy)) < 1e-9);
+check('speed() matches |v|', Math.abs(SIM.speed() - Math.hypot(0, 80)) < 1e-9);
 
 // Test 7: crash on planet — place satellite inside a planet, step, expect crashed
 SIM.init();
@@ -238,58 +238,122 @@ if (!SIM.isCrashed()) {
   console.log('SKIP angle change check (satellite crashed during step)');
 }
 
-// Test 23: fuel barrels exist after init
+// Test 23: astronauts exist after init
 SIM.init();
-const barrels = SIM.getFuelBarrels();
-check('fuel barrels created after init', barrels.length === 5);
-check('all barrels are within world bounds',
-  barrels.every(b => b.x > 0 && b.x < 2000 && b.y > 0 && b.y < 1200));
+const astronauts = SIM.getAstronauts();
+check('astronauts created after init', astronauts.length === 5);
+check('all astronauts are within world bounds',
+  astronauts.every(a => a.x > 0 && a.x < 2000 && a.y > 0 && a.y < 1200));
+check('collected starts at 0', SIM.getCollected() === 0);
+check('total astronauts is 5', SIM.getTotalAstronauts() === 5);
 
-// Test 24: touching a barrel refuels and removes it
-// Burn fuel first so refuel is visible
+// Test 24: touching an astronaut collects it (no fuel refuel)
 SIM.placeSatellite(100, 100, 0, 0);
 for (let i = 0; i < 20; i++) SIM.thrust(1, 0);
 const fuelAfterBurn = SIM.getFuel();
 check('fuel decreased after burning', fuelAfterBurn < SIM.getFuelMax());
-// Now touch a barrel
-const barrels2 = SIM.getFuelBarrels();
-if (barrels2.length > 0) {
-  const b = barrels2[0];
-  SIM.placeSatellite(b.x, b.y, 0, 0); // place exactly on the barrel (resets fuel to max)
-  // placeSatellite resets fuel to max, so burn a little again
-  for (let i = 0; i < 10; i++) SIM.thrust(1, 0);
-  const fuelBeforeRefuel = SIM.getFuel();
-  const barrelsBefore = SIM.getFuelBarrels().length;
-  // Move the satellite onto the barrel we want to collect (re-place on it)
-  const b2 = SIM.getFuelBarrels()[0];
-  SIM.placeSatellite(b2.x, b2.y, 0, 0);
+const astronauts2 = SIM.getAstronauts();
+if (astronauts2.length > 0) {
+  const a = astronauts2[0];
+  const planet = SIM.getWorld().planets[a.orbitPlanet];
+  // Place satellite at the astronaut's position, velocity zero.
+  // In step(): RK4 moves the satellite slightly, then checkAstronauts
+  // tests distance <= (a.r + 10). The astronaut stays at its orbit
+  // position during checkAstronauts (stepAstronauts runs after).
+  SIM.placeSatellite(a.x, a.y, 0, 0);
   const fuelBeforeTouch = SIM.getFuel();
+  const astronautsBefore = SIM.getAstronauts().length;
+  const collectedBefore = SIM.getCollected();
   SIM.step();
   const fuelAfterTouch = SIM.getFuel();
-  const barrelsAfter = SIM.getFuelBarrels().length;
-  check('barrel removed after touch', barrelsAfter === barrelsBefore - 1);
-  check('fuel increased after touching barrel (refuel +25)', fuelAfterTouch > fuelBeforeTouch || fuelAfterTouch === SIM.getFuelMax());
+  const astronautsAfter = SIM.getAstronauts().length;
+  const collectedAfter = SIM.getCollected();
+  // The satellite moved slightly due to gravity during RK4, so it may
+  // not be exactly on the astronaut. Check that the astronaut was
+  // collected OR that the distance is still small (within tolerance).
+  check('astronaut removed after touch', astronautsAfter === astronautsBefore - 1);
+  check('collected incremented after touch', collectedAfter === collectedBefore + 1);
+  check('fuel did not jump by refuel amount (no barrel refuel)',
+    fuelAfterTouch - fuelBeforeTouch < 5);
 } else {
-  console.log('SKIP barrel touch check (no barrels)');
+  console.log('SKIP astronaut touch check (no astronauts)');
 }
 
-// Test 25: refuel is capped at FUEL_MAX
+// Test 25: fuel regen — fuel increases over time when not thrusting
 SIM.placeSatellite(100, 100, 0, 0);
-SIM.thrust(1, 0); // burn a little fuel
-const barrels3 = SIM.getFuelBarrels();
-if (barrels3.length > 0) {
-  const b = barrels3[0];
-  SIM.placeSatellite(b.x, b.y, 0, 0);
-  SIM.step();
-  check('fuel after refuel is at most FUEL_MAX', SIM.getFuel() <= SIM.getFuelMax());
-}
+for (let i = 0; i < 50; i++) SIM.thrust(1, 0); // burn fuel
+const fuelBeforeRegen = SIM.getFuel();
+for (let i = 0; i < 100; i++) SIM.step(); // 100 frames of regen
+const fuelAfterRegen = SIM.getFuel();
+check('fuel increased from regen', fuelAfterRegen > fuelBeforeRegen);
+check('fuel regen is slow (less than burn rate)',
+  (fuelAfterRegen - fuelBeforeRegen) / 100 < 0.35);
 
-// Test 26: randomizePlanets recreates barrels
-const barrelsBeforeRandomize = SIM.getFuelBarrels().length;
+// Test 26: randomizePlanets recreates astronauts and resets counter
 SIM.randomizePlanets();
-const barrelsAfterRandomize = SIM.getFuelBarrels().length;
-check('randomizePlanets recreates fuel barrels', barrelsAfterRandomize === 5);
-check('barrel count is 5 after randomize', barrelsAfterRandomize === 5);
+check('randomizePlanets recreates astronauts', SIM.getAstronauts().length === 5);
+check('randomizePlanets resets collected to 0', SIM.getCollected() === 0);
+
+// Test 27: astronauts orbit their assigned planet
+SIM.init();
+const astroList = SIM.getAstronauts();
+check('astronauts have orbitPlanet and orbitR properties',
+  astroList.every(a => typeof a.orbitPlanet === 'number' && typeof a.orbitR === 'number'));
+const aBefore = { x: astroList[0].x, y: astroList[0].y };
+for (let i = 0; i < 60; i++) SIM.step();
+const aAfter = { x: astroList[0].x, y: astroList[0].y };
+const aMoved = Math.hypot(aAfter.x - aBefore.x, aAfter.y - aBefore.y);
+check('astronaut moved after 60 frames (orbiting)', aMoved > 1);
+const planet = astroList[0];
+const distToPlanet = Math.hypot(
+  aAfter.x - SIM.getWorld().planets[planet.orbitPlanet].x,
+  aAfter.y - SIM.getWorld().planets[planet.orbitPlanet].y
+);
+check('astronaut is at orbit radius from its planet',
+  Math.abs(distToPlanet - planet.orbitR) < 5);
+
+// Test 28: resetSatellite recreates astronauts and resets counter
+SIM.init();
+// Collect one astronaut
+const aToCollect = SIM.getAstronauts()[0];
+SIM.placeSatellite(aToCollect.x, aToCollect.y, 0, 0);
+SIM.step();
+check('astronaut was collected', SIM.getCollected() >= 1);
+check('astronaut count decreased', SIM.getAstronauts().length < 5);
+// Reset
+SIM.resetSatellite();
+check('resetSatellite recreates all astronauts', SIM.getAstronauts().length === 5);
+check('resetSatellite resets collected to 0', SIM.getCollected() === 0);
+
+// Test 29: time tracking
+SIM.init();
+check('elapsed starts at 0', SIM.getElapsed() === 0);
+for (let i = 0; i < 60; i++) SIM.step();
+check('elapsed increased after 60 frames', SIM.getElapsed() > 0);
+check('elapsed is approximately 0.25s (60 frames * DT*SUBSTEPS)',
+  Math.abs(SIM.getElapsed() - 60 * SIM.DT * 4) < 1);
+
+// Test 30: portal exists and game not won initially
+const portal = SIM.getPortal();
+check('portal has x, y, r', typeof portal.x === 'number' && typeof portal.y === 'number' && typeof portal.r === 'number');
+check('game not won initially', SIM.isGameWon() === false);
+
+// Test 31: entering portal wins the game
+SIM.placeSatellite(portal.x, portal.y, 0, 0);
+SIM.step();
+check('game won after entering portal', SIM.isGameWon() === true);
+check('elapsed is frozen after win', SIM.getElapsed() > 0);
+// Further steps should not change elapsed
+const elapsedAtWin = SIM.getElapsed();
+SIM.step();
+check('elapsed unchanged after game won', SIM.getElapsed() === elapsedAtWin);
+
+// Test 32: reset after game won
+SIM.resetSatellite();
+check('reset after win: game not won', SIM.isGameWon() === false);
+check('reset after win: elapsed is 0', SIM.getElapsed() === 0);
+check('reset after win: astronauts recreated', SIM.getAstronauts().length === 5);
+check('reset after win: collected is 0', SIM.getCollected() === 0);
 
 console.log(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
 process.exit(failures === 0 ? 0 : 1);

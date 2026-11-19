@@ -13,18 +13,22 @@ const SIM = (() => {
   const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
   const MAX_TRAIL = 4000;
   const FUEL_MAX = 100;
-  const FUEL_BURN_PER_FRAME = 0.35;
+  const FUEL_BURN_PER_FRAME = 0.15;
+  const FUEL_REGEN_PER_FRAME = 0.01;
   const THRUST_ACCEL = 120;
-  const BARREL_COUNT = 5;
-  const BARREL_RADIUS = 20;
-  const BARREL_REFUEL = 25;
+  const ASTRONAUT_COUNT = 5;
+  const ASTRONAUT_RADIUS = 18;
+
+  const PORTAL_X = 1880;
+  const PORTAL_Y = 120;
+  const PORTAL_RADIUS = 45;
 
   const world = {
     width: 2000,
     height: 1200,
     planets: [],
     stars: [],
-    fuelBarrels: [],
+    astronauts: [],
   };
 
   const satellite = {
@@ -40,6 +44,10 @@ const SIM = (() => {
     thrustDir: null,
     angle: 0,
   };
+
+  let collected = 0;
+  let elapsed = 0;
+  let gameWon = false;
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
@@ -74,16 +82,25 @@ const SIM = (() => {
     return stars;
   }
 
-  function makeFuelBarrels() {
-    const barrels = [];
-    for (let i = 0; i < BARREL_COUNT; i++) {
-      barrels.push({
-        x: rand(60, world.width - 60),
-        y: rand(60, world.height - 60),
-        r: BARREL_RADIUS,
+  const ASTRONAUT_ORBIT_R = 60;
+  const ASTRONAUT_ORBIT_SPEED = 1.5;
+
+  function makeAstronauts() {
+    const astronauts = [];
+    for (let i = 0; i < ASTRONAUT_COUNT; i++) {
+      const planetIdx = i % world.planets.length;
+      const planet = world.planets[planetIdx];
+      const phase = rand(0, Math.PI * 2);
+      astronauts.push({
+        x: planet.x + Math.cos(phase) * ASTRONAUT_ORBIT_R,
+        y: planet.y + Math.sin(phase) * ASTRONAUT_ORBIT_R,
+        orbitPlanet: planetIdx,
+        orbitR: ASTRONAUT_ORBIT_R,
+        orbitPhase: phase,
+        r: ASTRONAUT_RADIUS,
       });
     }
-    return barrels;
+    return astronauts;
   }
 
   function savePlanets() {
@@ -115,11 +132,32 @@ const SIM = (() => {
     }
   }
 
+  const LAUNCH_X = 1000;
+  const LAUNCH_Y = 1100;
+  const LAUNCH_VX = 0;
+  const LAUNCH_VY = -80;
+
   function updateAngle() {
     const sp = Math.hypot(satellite.vx, satellite.vy);
     if (sp > 1e-9) {
       satellite.angle = Math.atan2(satellite.vy, satellite.vx);
     }
+  }
+
+  function launch() {
+    satellite.x = LAUNCH_X;
+    satellite.y = LAUNCH_Y;
+    satellite.vx = LAUNCH_VX;
+    satellite.vy = LAUNCH_VY;
+    satellite.start = { x: LAUNCH_X, y: LAUNCH_Y, vx: LAUNCH_VX, vy: LAUNCH_VY };
+    satellite.trail = [];
+    satellite.crashed = false;
+    satellite.crashedPlanet = null;
+    satellite.fuel = FUEL_MAX;
+    satellite.thrustDir = null;
+    elapsed = 0;
+    gameWon = false;
+    updateAngle();
   }
 
   function init() {
@@ -128,54 +166,33 @@ const SIM = (() => {
       savePlanets();
     }
     world.stars = makeStars();
-    world.fuelBarrels = makeFuelBarrels();
-    satellite.x = world.width / 2;
-    satellite.y = world.height / 2;
-    satellite.vx = 0;
-    satellite.vy = 0;
-    satellite.start = null;
-    satellite.trail = [];
-    satellite.crashed = false;
-    satellite.crashedPlanet = null;
-    satellite.fuel = FUEL_MAX;
-    satellite.thrustDir = null;
-    satellite.angle = 0;
+    world.astronauts = makeAstronauts();
+    collected = 0;
+    launch();
   }
 
   function randomizePlanets() {
     world.planets = makePlanets();
-    world.fuelBarrels = makeFuelBarrels();
+    world.astronauts = makeAstronauts();
+    collected = 0;
     savePlanets();
-    satellite.start = null;
-    satellite.trail = [];
-    satellite.crashed = false;
-    satellite.crashedPlanet = null;
-    satellite.fuel = FUEL_MAX;
-    satellite.thrustDir = null;
-    satellite.angle = 0;
+    launch();
   }
 
+  function resetSatellite() {
+    world.astronauts = makeAstronauts();
+    collected = 0;
+    launch();
+  }
+
+  // For testing: place the satellite at an arbitrary position with a
+  // given velocity. Resets fuel and crash state. Not used in the UI.
   function placeSatellite(x, y, vx, vy) {
     satellite.start = { x, y, vx, vy };
     satellite.x = x;
     satellite.y = y;
     satellite.vx = vx;
     satellite.vy = vy;
-    satellite.trail = [];
-    satellite.crashed = false;
-    satellite.crashedPlanet = null;
-    satellite.fuel = FUEL_MAX;
-    satellite.thrustDir = null;
-    updateAngle();
-  }
-
-  function resetSatellite() {
-    if (!satellite.start) return;
-    const s = satellite.start;
-    satellite.x = s.x;
-    satellite.y = s.y;
-    satellite.vx = s.vx;
-    satellite.vy = s.vy;
     satellite.trail = [];
     satellite.crashed = false;
     satellite.crashedPlanet = null;
@@ -196,7 +213,6 @@ const SIM = (() => {
     satellite.fuel -= burn;
     satellite.vx += ux * THRUST_ACCEL * DT * SUBSTEPS;
     satellite.vy += uy * THRUST_ACCEL * DT * SUBSTEPS;
-    // thrustDir stores the exhaust direction (opposite to acceleration)
     satellite.thrustDir = { x: -ux, y: -uy };
     return true;
   }
@@ -276,27 +292,56 @@ const SIM = (() => {
     satellite.vy = vy + (h / 6) * (k1vy + 2 * k2vy + 2 * k3vy + k4vy);
   }
 
-  function checkBarrels() {
+  function checkAstronauts() {
     if (satellite.crashed) return;
-    for (let i = world.fuelBarrels.length - 1; i >= 0; i--) {
-      const b = world.fuelBarrels[i];
-      const dx = satellite.x - b.x;
-      const dy = satellite.y - b.y;
-      if (dx * dx + dy * dy <= (b.r + 8) * (b.r + 8)) {
-        satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + BARREL_REFUEL);
-        world.fuelBarrels.splice(i, 1);
+    for (let i = world.astronauts.length - 1; i >= 0; i--) {
+      const a = world.astronauts[i];
+      const dx = satellite.x - a.x;
+      const dy = satellite.y - a.y;
+      if (dx * dx + dy * dy <= (a.r + 10) * (a.r + 10)) {
+        world.astronauts.splice(i, 1);
+        collected++;
       }
     }
   }
 
-  function step() {
+  function regenFuel() {
     if (satellite.crashed) return;
+    satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + FUEL_REGEN_PER_FRAME);
+  }
+
+  // Astronauts orbit their assigned planet on a small fixed circle.
+  function stepAstronauts() {
+    for (const a of world.astronauts) {
+      a.orbitPhase += ASTRONAUT_ORBIT_SPEED * DT * SUBSTEPS;
+      const p = world.planets[a.orbitPlanet];
+      a.x = p.x + Math.cos(a.orbitPhase) * a.orbitR;
+      a.y = p.y + Math.sin(a.orbitPhase) * a.orbitR;
+    }
+  }
+
+  function checkPortal() {
+    if (gameWon) return;
+    const dx = satellite.x - PORTAL_X;
+    const dy = satellite.y - PORTAL_Y;
+    if (dx * dx + dy * dy <= PORTAL_RADIUS * PORTAL_RADIUS) {
+      gameWon = true;
+    }
+  }
+
+  function step() {
+    if (satellite.crashed || gameWon) return;
+    elapsed += DT * SUBSTEPS;
     for (let i = 0; i < SUBSTEPS; i++) {
       rk4Step();
+      checkAstronauts();
       checkCrash();
       if (satellite.crashed) return;
+      checkPortal();
+      if (gameWon) return;
     }
-    checkBarrels();
+    regenFuel();
+    stepAstronauts();
     updateAngle();
     if (satellite.trail.length > 0) {
       const last = satellite.trail[satellite.trail.length - 1];
@@ -341,8 +386,28 @@ const SIM = (() => {
     return satellite.angle;
   }
 
-  function getFuelBarrels() {
-    return world.fuelBarrels;
+  function getAstronauts() {
+    return world.astronauts;
+  }
+
+  function getCollected() {
+    return collected;
+  }
+
+  function getTotalAstronauts() {
+    return ASTRONAUT_COUNT;
+  }
+
+  function getElapsed() {
+    return elapsed;
+  }
+
+  function isGameWon() {
+    return gameWon;
+  }
+
+  function getPortal() {
+    return { x: PORTAL_X, y: PORTAL_Y, r: PORTAL_RADIUS };
   }
 
   function getWorld() {
@@ -364,12 +429,17 @@ const SIM = (() => {
     step,
     speed,
     isCrashed,
+    isGameWon,
     getFuel,
     getFuelMax,
     isThrusting,
     getThrustDir,
     getAngle,
-    getFuelBarrels,
+    getAstronauts,
+    getCollected,
+    getTotalAstronauts,
+    getElapsed,
+    getPortal,
     getWorld,
     getSatellite,
     STORAGE_KEY,

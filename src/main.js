@@ -14,7 +14,6 @@
   };
 
   let showTrail = true;
-  let placing = null;
   const keysDown = new Set();
   const particles = [];
 
@@ -132,35 +131,144 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawFuelBarrels() {
-    const barrels = SIM.getFuelBarrels();
-    for (const b of barrels) {
-      const c = toScreen(b.x, b.y);
-      const r = b.r * camera.zoom;
-      if (c.x < -r - 20 || c.x > canvas.width / (window.devicePixelRatio || 1) + r + 20 ||
-          c.y < -r - 20 || c.y > canvas.height / (window.devicePixelRatio || 1) + r + 20) {
-        continue;
-      }
-      // Barrel body: circle with a lightning bolt icon inside
-      ctx.fillStyle = 'rgba(30, 60, 120, 0.6)';
+  function drawAstronauts() {
+    const astronauts = SIM.getAstronauts();
+    const dpr = window.devicePixelRatio || 1;
+    const screenW = canvas.width / dpr;
+    const screenH = canvas.height / dpr;
+    for (const a of astronauts) {
+      const c = toScreen(a.x, a.y);
+      const r = a.r * camera.zoom;
+      if (c.x < -r * 2 - 20 || c.x > screenW + r * 2 + 20 ||
+          c.y < -r * 2 - 20 || c.y > screenH + r * 2 + 20) continue;
+
+      const suitColor = '#e8edf5';
+      const suitOutline = 'rgba(130, 150, 180, 0.8)';
+      const visorColor = 'rgba(30, 50, 80, 0.92)';
+      const visorHighlight = 'rgba(160, 210, 255, 0.45)';
+      const packColor = 'rgba(170, 180, 200, 0.75)';
+      const jointColor = 'rgba(200, 210, 225, 0.9)';
+
+      // Legs (drawn first, behind the torso)
+      const legW = r * 0.38;
+      const legLen = r * 0.75;
+      // Left leg — slightly angled outward
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = legW;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(120, 180, 255, 0.8)';
-      ctx.lineWidth = 2;
+      ctx.moveTo(c.x - r * 0.15, c.y + r * 0.3);
+      ctx.lineTo(c.x - r * 0.4, c.y + r * 0.3 + legLen);
       ctx.stroke();
-      // Lightning bolt: a zigzag path inside the barrel
-      const s = r * 0.6;
-      ctx.fillStyle = '#ffe060';
+      // Right leg — slightly angled outward
       ctx.beginPath();
-      ctx.moveTo(c.x + s * 0.1, c.y - s * 0.7);
-      ctx.lineTo(c.x - s * 0.3, c.y + s * 0.1);
-      ctx.lineTo(c.x + s * 0.1, c.y + s * 0.1);
-      ctx.lineTo(c.x - s * 0.1, c.y + s * 0.7);
-      ctx.lineTo(c.x + s * 0.4, c.y - s * 0.1);
-      ctx.lineTo(c.x + s * 0.0, c.y - s * 0.1);
-      ctx.closePath();
+      ctx.moveTo(c.x + r * 0.15, c.y + r * 0.3);
+      ctx.lineTo(c.x + r * 0.4, c.y + r * 0.3 + legLen);
+      ctx.stroke();
+      // Boots
+      ctx.fillStyle = suitColor;
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = 1;
+      for (const side of [-1, 1]) {
+        const bx = c.x + side * r * 0.4;
+        const by = c.y + r * 0.3 + legLen;
+        ctx.beginPath();
+        ctx.arc(bx, by, legW * 0.75, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Arms (behind torso)
+      const armW = r * 0.3;
+      const armLen = r * 0.65;
+      // Left arm — angled outward and slightly down
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = armW;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c.x - r * 0.3, c.y - r * 0.1);
+      ctx.lineTo(c.x - r * 0.3 - armLen * 0.7, c.y - r * 0.1 + armLen * 0.7);
+      ctx.stroke();
+      // Right arm — angled outward and slightly up (waving)
+      ctx.beginPath();
+      ctx.moveTo(c.x + r * 0.3, c.y - r * 0.1);
+      ctx.lineTo(c.x + r * 0.3 + armLen * 0.7, c.y - r * 0.1 - armLen * 0.5);
+      ctx.stroke();
+      // Gloves
+      ctx.fillStyle = suitColor;
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = 1;
+      // Left glove
+      ctx.beginPath();
+      ctx.arc(c.x - r * 0.3 - armLen * 0.7, c.y - r * 0.1 + armLen * 0.7, armW * 0.65, 0, Math.PI * 2);
       ctx.fill();
+      ctx.stroke();
+      // Right glove
+      ctx.beginPath();
+      ctx.arc(c.x + r * 0.3 + armLen * 0.7, c.y - r * 0.1 - armLen * 0.5, armW * 0.65, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Torso (suit body) — slim
+      ctx.fillStyle = suitColor;
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, r * 0.38, r * 0.65, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Life support backpack (behind torso, visible on top)
+      ctx.fillStyle = packColor;
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(c.x - r * 0.25, c.y - r * 0.6, r * 0.5, r * 0.35, r * 0.06);
+      ctx.fill();
+      ctx.stroke();
+
+      // Chest control panel
+      ctx.fillStyle = 'rgba(100, 120, 150, 0.6)';
+      ctx.fillRect(c.x - r * 0.12, c.y - r * 0.05, r * 0.24, r * 0.2);
+      ctx.fillStyle = 'rgba(80, 200, 120, 0.8)';
+      ctx.fillRect(c.x - r * 0.08, c.y, r * 0.07, r * 0.05);
+      ctx.fillStyle = 'rgba(255, 180, 60, 0.8)';
+      ctx.fillRect(c.x + r * 0.01, c.y, r * 0.07, r * 0.05);
+
+      // Helmet
+      ctx.fillStyle = suitColor;
+      ctx.strokeStyle = suitOutline;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y - r * 0.55, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Visor
+      ctx.fillStyle = visorColor;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y - r * 0.55, r * 0.28, r * 0.22, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Visor highlight
+      ctx.strokeStyle = visorHighlight;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(c.x - r * 0.08, c.y - r * 0.62, r * 0.12, Math.PI * 1.1, Math.PI * 1.8);
+      ctx.stroke();
+
+      // Joint connectors (shoulders, hips)
+      ctx.fillStyle = jointColor;
+      for (const jx of [-r * 0.28, r * 0.28]) {
+        ctx.beginPath();
+        ctx.arc(c.x + jx, c.y - r * 0.1, r * 0.14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (const jx of [-r * 0.15, r * 0.15]) {
+        ctx.beginPath();
+        ctx.arc(c.x + jx, c.y + r * 0.3, r * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -290,36 +398,6 @@
     ctx.beginPath();
     ctx.arc(c.x, c.y, size + 3, 0, Math.PI * 2);
     ctx.stroke();
-  }
-
-  function drawPlacementArrow() {
-    if (!placing) return;
-    const s = toScreen(placing.x, placing.y);
-    const e = toScreen(placing.ex, placing.ey);
-    ctx.strokeStyle = 'rgba(255, 210, 90, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(s.x, s.y);
-    ctx.lineTo(e.x, e.y);
-    ctx.stroke();
-    const dx = e.x - s.x;
-    const dy = e.y - s.y;
-    const len = Math.hypot(dx, dy);
-    if (len > 4) {
-      const ux = dx / len;
-      const uy = dy / len;
-      ctx.fillStyle = 'rgba(255, 210, 90, 0.9)';
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y);
-      ctx.lineTo(e.x - ux * 10 - uy * 5, e.y - uy * 10 + ux * 5);
-      ctx.lineTo(e.x - ux * 10 + uy * 5, e.y - uy * 10 - ux * 5);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(255, 210, 90, 0.9)';
-    ctx.beginPath();
-    ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
-    ctx.fill();
   }
 
   function drawCrashMarker() {
@@ -452,21 +530,154 @@
     ctx.fillText('Топливо: ' + Math.round(fuel) + '%', x, y - 6);
   }
 
+  function drawAstronautCounter() {
+    const collected = SIM.getCollected();
+    const total = SIM.getTotalAstronauts();
+    const dpr = window.devicePixelRatio || 1;
+    const x = canvas.width / dpr - 16;
+    const y = 20;
+    // Mini astronaut icon with limbs
+    const s = 10;
+    const ix = x - 60;
+    const iy = y + 8;
+    ctx.lineCap = 'round';
+    // Legs
+    ctx.strokeStyle = 'rgba(130, 150, 180, 0.9)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(ix - 2, iy + 3); ctx.lineTo(ix - 5, iy + 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ix + 2, iy + 3); ctx.lineTo(ix + 5, iy + 10); ctx.stroke();
+    // Arms
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(ix - 5, iy - 2); ctx.lineTo(ix - 9, iy + 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ix + 5, iy - 2); ctx.lineTo(ix + 9, iy - 5); ctx.stroke();
+    // Torso
+    ctx.fillStyle = '#e8edf5';
+    ctx.strokeStyle = 'rgba(130, 150, 180, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(ix, iy, 4, 5, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Helmet
+    ctx.beginPath();
+    ctx.arc(ix, iy - 5, 3.5, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Visor
+    ctx.fillStyle = 'rgba(30, 50, 80, 0.9)';
+    ctx.beginPath();
+    ctx.ellipse(ix, iy - 5, 2.2, 1.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Counter text
+    ctx.fillStyle = 'rgba(220, 235, 255, 0.95)';
+    ctx.font = 'bold 16px system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(collected + ' / ' + total, x, y + 14);
+    ctx.textAlign = 'left';
+  }
+
+  function drawPortal() {
+    const p = SIM.getPortal();
+    const c = toScreen(p.x, p.y);
+    const r = p.r * camera.zoom;
+    if (c.x < -r - 50 || c.x > canvas.width / (window.devicePixelRatio || 1) + r + 50 ||
+        c.y < -r - 50 || c.y > canvas.height / (window.devicePixelRatio || 1) + r + 50) return;
+    const t = performance.now() / 1000;
+    // Outer glow
+    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.3, c.x, c.y, r * 1.8);
+    glow.addColorStop(0, 'rgba(120, 60, 255, 0.4)');
+    glow.addColorStop(0.5, 'rgba(80, 120, 255, 0.15)');
+    glow.addColorStop(1, 'rgba(60, 60, 200, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    // Swirling ring
+    for (let i = 0; i < 3; i++) {
+      const angle = t * (1.5 + i * 0.5) + i * Math.PI * 2 / 3;
+      const ringR = r * (0.7 + i * 0.15);
+      ctx.strokeStyle = 'rgba(' + (100 + i * 40) + ', ' + (60 + i * 50) + ', 255, ' + (0.5 - i * 0.1) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, ringR, angle, angle + Math.PI * 1.2);
+      ctx.stroke();
+    }
+    // Core
+    const core = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r * 0.6);
+    core.addColorStop(0, 'rgba(200, 180, 255, 0.9)');
+    core.addColorStop(0.5, 'rgba(120, 80, 255, 0.6)');
+    core.addColorStop(1, 'rgba(60, 40, 200, 0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    // Label
+    ctx.fillStyle = 'rgba(180, 160, 255, 0.8)';
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Портал', c.x, c.y - r - 8);
+    ctx.textAlign = 'left';
+  }
+
+  function drawGameOver() {
+    if (!SIM.isGameWon()) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width / dpr;
+    const h = canvas.height / dpr;
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, w, h);
+    // Panel
+    const pw = Math.min(420, w - 40);
+    const ph = 200;
+    const px = (w - pw) / 2;
+    const py = (h - ph) / 2;
+    ctx.fillStyle = 'rgba(15, 20, 40, 0.95)';
+    ctx.strokeStyle = 'rgba(120, 100, 255, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(px, py, pw, ph, 12);
+    ctx.fill();
+    ctx.stroke();
+    // Title
+    ctx.fillStyle = 'rgba(220, 200, 255, 0.95)';
+    ctx.font = 'bold 24px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Игра завершена!', w / 2, py + 40);
+    // Stats
+    const collected = SIM.getCollected();
+    const total = SIM.getTotalAstronauts();
+    const elapsed = SIM.getElapsed();
+    const mins = Math.floor(elapsed / 60);
+    const secs = Math.floor(elapsed % 60);
+    ctx.font = '18px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(180, 200, 230, 0.9)';
+    ctx.fillText('Космонавты: ' + collected + ' / ' + total, w / 2, py + 80);
+    ctx.fillText('Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
+    // Prompt
+    ctx.fillStyle = 'rgba(255, 220, 100, 0.9)';
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.fillText('Нажмите любую клавишу для нового полёта', w / 2, py + ph - 25);
+    ctx.textAlign = 'left';
+  }
+
   function drawHud() {
     const speed = SIM.speed();
     ctx.font = '13px system-ui, sans-serif';
     if (sat.crashed) {
       ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
-      ctx.fillText('Спутник упал на планету — полёт завершён. Кнопка «Сброс полёта» или новая установка мышью.', 16, window.innerHeight - 16);
-    } else {
+      ctx.fillText('Спутник упал на планету — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
+    } else if (!SIM.isGameWon()) {
       ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
-      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с', 16, window.innerHeight - 16);
+      const elapsed = SIM.getElapsed();
+      const mins = Math.floor(elapsed / 60);
+      const secs = Math.floor(elapsed % 60);
+      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0'), 16, window.innerHeight - 16);
     }
     drawFuelBar();
+    drawAstronautCounter();
   }
 
   function frame() {
-    if (!sat.crashed) {
+    if (!sat.crashed && !SIM.isGameWon()) {
       const dir = currentThrustDir();
       if (dir) {
         SIM.thrust(dir.x, dir.y);
@@ -482,8 +693,9 @@
     ctx.fillStyle = '#04060d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawStars();
+    drawPortal();
     drawTrail();
-    drawFuelBarrels();
+    drawAstronauts();
     drawPlanets();
     if (sat.crashed) {
       drawCrashMarker();
@@ -491,8 +703,8 @@
       drawSatellite();
     }
     drawParticles();
-    drawPlacementArrow();
     drawHud();
+    drawGameOver();
     requestAnimationFrame(frame);
   }
 
@@ -505,28 +717,6 @@
     camera.x += before.x - after.x;
     camera.y += before.y - after.y;
   }, { passive: false });
-
-  canvas.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    const w = toWorld(e.offsetX, e.offsetY);
-    placing = { x: w.x, y: w.y, ex: w.x, ey: w.y };
-    canvas.setPointerCapture(e.pointerId);
-  });
-
-  canvas.addEventListener('pointermove', (e) => {
-    if (!placing) return;
-    const w = toWorld(e.offsetX, e.offsetY);
-    placing.ex = w.x;
-    placing.ey = w.y;
-  });
-
-  canvas.addEventListener('pointerup', (e) => {
-    if (!placing || e.button !== 0) return;
-    const vx = (placing.ex - placing.x) * 2;
-    const vy = (placing.ey - placing.y) * 2;
-    SIM.placeSatellite(placing.x, placing.y, vx, vy);
-    placing = null;
-  });
 
   const btnTrail = document.getElementById('btnTrail');
   btnTrail.addEventListener('click', () => {
@@ -554,6 +744,11 @@
   window.addEventListener('resize', resize);
 
   window.addEventListener('keydown', (e) => {
+    if (sat.crashed || SIM.isGameWon()) {
+      SIM.resetSatellite();
+      keysDown.clear();
+      return;
+    }
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
       e.preventDefault();
       keysDown.add(e.key);
