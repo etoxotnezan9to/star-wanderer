@@ -6,15 +6,25 @@ const SIM = (() => {
   const G = 5000;
   const DT = 1 / 240;
   const SUBSTEPS = 4;
+  // Simulated time advanced by one step(): 1/60 s of game time.
+  const TICK = DT * SUBSTEPS;
   const SOFTEN = 4;
   const SOFTEN2 = SOFTEN * SOFTEN;
   const PLANET_MIN_R = 16;
   const PLANET_MAX_R = 42;
   const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
   const MAX_TRAIL = 4000;
+  // Fuel tuning. Rates are in fuel units per second of game time; the
+  // tank holds FUEL_MAX units.
+  //   FUEL_BURN_PER_SECOND  — spent while an engine is firing
+  //                           (100 / 15 ≈ 6.7 s of thrust on a full tank).
+  //   FUEL_REGEN_PER_SECOND — restored all the time while flying
+  //                           (100 / 0.15 ≈ 11 min from empty to full).
   const FUEL_MAX = 100;
-  const FUEL_BURN_PER_FRAME = 0.15;
-  const FUEL_REGEN_PER_FRAME = 0.01;
+  const FUEL_BURN_PER_SECOND = 15;
+  const FUEL_REGEN_PER_SECOND = 0.15;
+  const FUEL_BURN_PER_TICK = FUEL_BURN_PER_SECOND * TICK;
+  const FUEL_REGEN_PER_TICK = FUEL_REGEN_PER_SECOND * TICK;
   const THRUST_ACCEL = 120;
   const ASTRONAUT_COUNT = 5;
   const ASTRONAUT_RADIUS = 18;
@@ -42,6 +52,7 @@ const SIM = (() => {
     crashedPlanet: null,
     fuel: FUEL_MAX,
     thrustDir: null,
+    engineCut: false,
     angle: 0,
   };
 
@@ -155,6 +166,7 @@ const SIM = (() => {
     satellite.crashedPlanet = null;
     satellite.fuel = FUEL_MAX;
     satellite.thrustDir = null;
+    satellite.engineCut = false;
     elapsed = 0;
     gameWon = false;
     updateAngle();
@@ -198,28 +210,46 @@ const SIM = (() => {
     satellite.crashedPlanet = null;
     satellite.fuel = FUEL_MAX;
     satellite.thrustDir = null;
+    satellite.engineCut = false;
     updateAngle();
   }
 
   // dirX, dirY — direction of acceleration in world coordinates (where the
   // satellite's nose points after thrust). Exhaust comes out opposite.
+  //
+  // When the tank runs dry the engine shuts off and stays off while thrust
+  // keeps being requested: the trickle of regenerated fuel is not burnt
+  // away tick by tick, it builds up. The engine can fire again only after
+  // the controls are released (setThrustDir(null)) or the flight is reset.
   function thrust(dirX, dirY) {
-    if (satellite.crashed || satellite.fuel <= 0) return false;
+    if (satellite.crashed) return false;
+    if (satellite.engineCut || satellite.fuel <= 0) {
+      satellite.engineCut = true;
+      satellite.thrustDir = null;
+      return false;
+    }
     const len = Math.hypot(dirX, dirY);
     if (len < 1e-9) return false;
     const ux = dirX / len;
     const uy = dirY / len;
-    const burn = Math.min(FUEL_BURN_PER_FRAME, satellite.fuel);
+    const burn = Math.min(FUEL_BURN_PER_TICK, satellite.fuel);
     satellite.fuel -= burn;
+    if (satellite.fuel <= 0) {
+      satellite.fuel = 0;
+      satellite.engineCut = true;
+    }
     satellite.vx += ux * THRUST_ACCEL * DT * SUBSTEPS;
     satellite.vy += uy * THRUST_ACCEL * DT * SUBSTEPS;
     satellite.thrustDir = { x: -ux, y: -uy };
     return true;
   }
 
+  // setThrustDir(null) means "no thrust requested" (all controls
+  // released); it also lifts an empty-tank shut-off.
   function setThrustDir(dirX, dirY) {
     if (dirX === null) {
       satellite.thrustDir = null;
+      satellite.engineCut = false;
       return;
     }
     const len = Math.hypot(dirX, dirY);
@@ -307,7 +337,7 @@ const SIM = (() => {
 
   function regenFuel() {
     if (satellite.crashed) return;
-    satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + FUEL_REGEN_PER_FRAME);
+    satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + FUEL_REGEN_PER_TICK);
   }
 
   // Astronauts orbit their assigned planet on a small fixed circle.
@@ -378,6 +408,12 @@ const SIM = (() => {
     return satellite.thrustDir !== null && satellite.fuel > 0 && !satellite.crashed;
   }
 
+  // True while the engine is shut off by an empty tank and waits for the
+  // controls to be released.
+  function isEngineCut() {
+    return satellite.engineCut;
+  }
+
   function getThrustDir() {
     return satellite.thrustDir;
   }
@@ -420,6 +456,7 @@ const SIM = (() => {
 
   return {
     DT,
+    TICK,
     init,
     randomizePlanets,
     placeSatellite,
@@ -433,6 +470,7 @@ const SIM = (() => {
     getFuel,
     getFuelMax,
     isThrusting,
+    isEngineCut,
     getThrustDir,
     getAngle,
     getAstronauts,

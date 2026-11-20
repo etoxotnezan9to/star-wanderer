@@ -355,5 +355,42 @@ check('reset after win: elapsed is 0', SIM.getElapsed() === 0);
 check('reset after win: astronauts recreated', SIM.getAstronauts().length === 5);
 check('reset after win: collected is 0', SIM.getCollected() === 0);
 
+// Test 33: an empty tank shuts the engine off while the keys stay held.
+// The UI calls thrust() every tick while an arrow is held and
+// setThrustDir(null) once all arrows are released. Planets are moved far
+// away and made massless for this test so gravity cannot crash the
+// satellite (astronauts still orbit them, so the list stays the same size).
+{
+  const w33 = SIM.getWorld();
+  const savedPlanets = w33.planets;
+  w33.planets = savedPlanets.map((p) => Object.assign({}, p, { x: p.x + 1e7, mass: 0 }));
+  SIM.placeSatellite(1000, 750, 0, 0);
+  let ticks = 0;
+  // hold the key until the engine stops firing (at most 60 s of game time)
+  while (SIM.thrust(1, 0) && ticks < 3600) { SIM.step(); ticks++; }
+  SIM.step();
+  check('held thrust empties the tank', SIM.getFuel() < 0.01);
+  // keep holding the key for 10 more seconds of game time
+  const vxEmpty = SIM.getSatellite().vx;
+  let firedWhileEmpty = 0;
+  for (let i = 0; i < 600; i++) { if (SIM.thrust(1, 0)) firedWhileEmpty++; SIM.step(); }
+  check('engine does not fire on an empty tank while the key is held', firedWhileEmpty === 0);
+  check('no acceleration on an empty tank while the key is held',
+    Math.abs(SIM.getSatellite().vx - vxEmpty) < 1e-9);
+  check('isThrusting false on an empty tank while the key is held', SIM.isThrusting() === false);
+  check('fuel regenerates while the engine is off', SIM.getFuel() > 1);
+  check('isEngineCut reports the shut-off engine', SIM.isEngineCut() === true);
+  // release all keys, then press again: the engine restarts on the regenerated fuel
+  SIM.setThrustDir(null);
+  check('releasing the keys clears the shut-off', SIM.isEngineCut() === false);
+  check('engine fires again after the keys are released and pressed', SIM.thrust(1, 0) === true);
+  // a reset also clears the shut-off
+  for (let i = 0; i < 3600 && SIM.thrust(1, 0); i++) SIM.step();
+  check('engine shut off again before reset', SIM.isEngineCut() === true);
+  SIM.resetSatellite();
+  check('reset clears the shut-off', SIM.isEngineCut() === false && SIM.thrust(1, 0) === true);
+  w33.planets = savedPlanets;
+}
+
 console.log(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
 process.exit(failures === 0 ? 0 : 1);

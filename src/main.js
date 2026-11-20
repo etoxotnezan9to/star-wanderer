@@ -14,6 +14,10 @@
   };
 
   let showTrail = true;
+  // How the arrow keys map to thrust: 'ship' — relative to the satellite's
+  // nose (up = forward, left/right = to its sides); 'screen' — fixed screen
+  // directions (left = towards the left edge of the screen).
+  let controlMode = 'ship';
   const keysDown = new Set();
   const particles = [];
 
@@ -21,6 +25,12 @@
   const MAX_ZOOM = 20;
   const PARTICLE_LIFE = 30;
   const PARTICLE_COUNT_PER_FRAME = 3;
+  // Trail look: opacity next to the satellite, distance (world units)
+  // over which it fades to nothing, and how many opacity bands make up the
+  // fade (more bands — smoother fade, a little more drawing work).
+  const TRAIL_ALPHA = 0.7;
+  const TRAIL_FADE_DISTANCE = 3000;
+  const TRAIL_FADE_STEPS = 64;
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -361,18 +371,49 @@
     }
   }
 
+  // The trail fades with the distance flown since that point: opaque
+  // (TRAIL_ALPHA) next to the satellite, fully transparent once the
+  // satellite has flown TRAIL_FADE_DISTANCE world units further along it.
+  //
+  // The trail is split into TRAIL_FADE_STEPS bands of equal opacity, one
+  // stroke per band, laid end to end. The bands are drawn additively
+  // ('lighter'): with ordinary blending the anti-aliased ends of two
+  // neighbouring strokes overlap at the joint and the line visibly dims
+  // there, a dot at every band boundary; added together, the two partial
+  // ends give exactly the coverage of an unbroken line, so the trail stays
+  // even. On the dark sky the additive look matches ordinary blending.
   function drawTrail() {
-    if (!showTrail || sat.trail.length < 2) return;
-    ctx.strokeStyle = 'rgba(120, 220, 255, 0.7)';
+    const trail = sat.trail;
+    if (!showTrail || trail.length < 2) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    const first = toScreen(sat.trail[0].x, sat.trail[0].y);
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < sat.trail.length; i++) {
-      const p = toScreen(sat.trail[i].x, sat.trail[i].y);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'butt';
+    let dist = 0;
+    let band = -1;
+    let prev = toScreen(trail[trail.length - 1].x, trail[trail.length - 1].y);
+    for (let i = trail.length - 2; i >= 0; i--) {
+      const a = trail[i + 1];
+      const b = trail[i];
+      dist += Math.hypot(a.x - b.x, a.y - b.y);
+      const fade = 1 - dist / TRAIL_FADE_DISTANCE;
+      if (fade <= 0) break;
+      const p = toScreen(b.x, b.y);
+      const newBand = Math.ceil(fade * TRAIL_FADE_STEPS);
+      if (newBand !== band) {
+        if (band >= 0) ctx.stroke();
+        band = newBand;
+        ctx.strokeStyle = 'rgba(120, 220, 255, ' +
+          (TRAIL_ALPHA * band / TRAIL_FADE_STEPS).toFixed(4) + ')';
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+      }
       ctx.lineTo(p.x, p.y);
+      prev = p;
     }
-    ctx.stroke();
+    if (band >= 0) ctx.stroke();
+    ctx.restore();
   }
 
   function drawSatellite() {
@@ -444,6 +485,12 @@
     if (len < 1e-9) return null;
     const nlx = lx / len;
     const nly = ly / len;
+    if (controlMode === 'screen') {
+      // Screen axes: "up" is towards the top of the screen, "right" towards
+      // its right edge, whatever the satellite's heading. The camera does
+      // not rotate or flip, so screen axes are world axes with y down.
+      return { x: nly, y: -nlx };
+    }
     const a = SIM.getAngle();
     const cos = Math.cos(a);
     const sin = Math.sin(a);
@@ -516,7 +563,8 @@
     const barW = 160;
     const barH = 14;
     const x = 16;
-    const y = 56;
+    // Below the button panel, which may wrap onto several rows.
+    const y = panel.getBoundingClientRect().bottom + 22;
     ctx.fillStyle = 'rgba(10, 18, 35, 0.85)';
     ctx.fillRect(x - 2, y - 2, barW + 4, barH + 4);
     ctx.strokeStyle = 'rgba(90, 130, 200, 0.7)';
@@ -528,6 +576,11 @@
     ctx.fillStyle = 'rgba(220, 235, 255, 0.9)';
     ctx.font = '11px system-ui, sans-serif';
     ctx.fillText('Топливо: ' + Math.round(fuel) + '%', x, y - 6);
+    if (SIM.isEngineCut()) {
+      ctx.fillStyle = 'rgba(255, 150, 110, 0.95)';
+      ctx.fillText('Двигатель выключен: бак пуст. Отпустите стрелки',
+        x, y + barH + 16);
+    }
   }
 
   function drawAstronautCounter() {
@@ -676,7 +729,9 @@
     drawAstronautCounter();
   }
 
-  function frame() {
+  // One fixed simulation tick (SIM.TICK seconds of game time): thrust,
+  // physics, fuel and exhaust particles all advance by the same amount.
+  function tick() {
     if (!sat.crashed && !SIM.isGameWon()) {
       const dir = currentThrustDir();
       if (dir) {
@@ -690,6 +745,26 @@
     }
     emitThrustParticles();
     updateParticles();
+  }
+
+  // Game speed follows real time, not the display refresh rate: the real
+  // time elapsed since the previous frame is accumulated and spent in fixed
+  // ticks, so 60, 144 or 240 Hz screens run the flight at the same speed.
+  // A long pause (hidden tab, debugger) is clamped so the game does not
+  // try to catch up with hundreds of ticks at once.
+  const MAX_FRAME_TIME = 0.25;
+  let lastTime = null;
+  let accumulator = 0;
+
+  function frame(now) {
+    if (lastTime === null) lastTime = now;
+    const frameTime = Math.min(MAX_FRAME_TIME, Math.max(0, (now - lastTime) / 1000));
+    lastTime = now;
+    accumulator += frameTime;
+    while (accumulator >= SIM.TICK) {
+      tick();
+      accumulator -= SIM.TICK;
+    }
     ctx.fillStyle = '#04060d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawStars();
@@ -717,6 +792,21 @@
     camera.x += before.x - after.x;
     camera.y += before.y - after.y;
   }, { passive: false });
+
+  const panel = document.getElementById('panel');
+
+  const btnControl = document.getElementById('btnControl');
+  function showControlMode() {
+    const screen = controlMode === 'screen';
+    btnControl.classList.toggle('active', screen);
+    btnControl.textContent = screen ? 'Управление: экран' : 'Управление: корабль';
+  }
+  btnControl.addEventListener('click', () => {
+    controlMode = controlMode === 'ship' ? 'screen' : 'ship';
+    showControlMode();
+    btnControl.blur(); // keep arrow keys and Space away from the button
+  });
+  showControlMode();
 
   const btnTrail = document.getElementById('btnTrail');
   btnTrail.addEventListener('click', () => {
