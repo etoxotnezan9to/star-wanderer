@@ -1,8 +1,6 @@
 'use strict';
 
 const SIM = (() => {
-  const STORAGE_KEY = 'satellite-sim.planets.v1';
-
   const G = 5000;
   const DT = 1 / 240;
   const SUBSTEPS = 4;
@@ -14,30 +12,40 @@ const SIM = (() => {
   const PLANET_MAX_R = 42;
   const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
   const MAX_TRAIL = 4000;
-  // Fuel tuning. Rates are in fuel units per second of game time; the
-  // tank holds FUEL_MAX units.
-  //   FUEL_BURN_PER_SECOND  — spent while an engine is firing
-  //                           (100 / 15 ≈ 6.7 s of thrust on a full tank).
-  //   FUEL_REGEN_PER_SECOND — restored all the time while flying
-  //                           (100 / 0.15 ≈ 11 min from empty to full).
+  // Planets spawn in the upper-right corner and drift towards the black hole
+  // at a constant velocity (uniform motion — only the satellite feels gravity).
+  const PLANET_SPAWN_X = 1900;
+  const PLANET_SPAWN_Y = 120;
+  const PLANET_SPAWN_SPREAD = 250;
+  const PLANET_DRIFT_SPEED = 12; // units per second of game time
+  const PLANET_MAX_COUNT = 6;
+  const PLANET_SPAWN_INTERVAL = 3; // seconds of game time between spawns
+
+  // Fuel tuning.
   const FUEL_MAX = 100;
   const FUEL_BURN_PER_SECOND = 15;
   const FUEL_REGEN_PER_SECOND = 0.15;
   const FUEL_BURN_PER_TICK = FUEL_BURN_PER_SECOND * TICK;
   const FUEL_REGEN_PER_TICK = FUEL_REGEN_PER_SECOND * TICK;
   const THRUST_ACCEL = 120;
+
   const ASTRONAUT_COUNT = 5;
   const ASTRONAUT_RADIUS = 18;
+  const ASTRONAUT_ORBIT_R = 60;
+  const ASTRONAUT_ORBIT_SPEED = 1.5;
 
   // Чёрная дыра: стоит в левом нижнем углу мира и постепенно растёт.
-  // Масса — BH_MASS (постоянная); сила притяжения — как у планеты.
-  // Радиус события r(t) = BH_INITIAL_R + BH_GROWTH_PER_SECOND * t;
-  // если космический корабль окажется внутри r — он поглощён.
+  // Планеты генерируются в правом верхнем углу и равномерно дрейфуют к ней.
   const BH_X = 60;
   const BH_Y = 1140;
   const BH_MASS = 100;
   const BH_INITIAL_R = 20;
   const BH_GROWTH_PER_SECOND = 1.2;
+
+  const LAUNCH_X = 1000;
+  const LAUNCH_Y = 1100;
+  const LAUNCH_VX = 0;
+  const LAUNCH_VY = -80;
 
   const world = {
     width: 2000,
@@ -71,19 +79,62 @@ const SIM = (() => {
     return min + Math.random() * (max - min);
   }
 
+  // Create a new planet in the upper-right corner with a drift velocity
+  // towards the black hole (constant speed).
+  function spawnPlanet() {
+    const r = rand(PLANET_MIN_R, PLANET_MAX_R);
+    const x = PLANET_SPAWN_X - rand(0, PLANET_SPAWN_SPREAD);
+    const y = PLANET_SPAWN_Y + rand(0, PLANET_SPAWN_SPREAD);
+    const dx = BH_X - x;
+    const dy = BH_Y - y;
+    const d = Math.hypot(dx, dy);
+    return {
+      x, y, r,
+      vx: (dx / d) * PLANET_DRIFT_SPEED,
+      vy: (dy / d) * PLANET_DRIFT_SPEED,
+      mass: r * r * 2,
+      color: PLANET_COLORS[Math.floor(Math.random() * PLANET_COLORS.length)],
+    };
+  }
+
   function makePlanets() {
     const planets = [];
     for (let i = 0; i < 3; i++) {
-      const r = rand(PLANET_MIN_R, PLANET_MAX_R);
-      planets.push({
-        x: rand(r + 60, world.width - r - 60),
-        y: rand(r + 60, world.height - r - 60),
-        r,
-        mass: r * r * 2,
-        color: PLANET_COLORS[i % PLANET_COLORS.length],
-      });
+      planets.push(spawnPlanet());
     }
     return planets;
+  }
+
+  // Advance planets by their drift velocity. Remove planets absorbed by the
+  // black hole or that have left the world far outside.
+  function stepPlanets() {
+    const dt = DT * SUBSTEPS;
+    for (let i = world.planets.length - 1; i >= 0; i--) {
+      const p = world.planets[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      // Remove if swallowed by the black hole (center within BH radius + planet r)
+      const dx = p.x - BH_X;
+      const dy = p.y - BH_Y;
+      if (dx * dx + dy * dy <= (blackHoleRadius + p.r * 0.5) * (blackHoleRadius + p.r * 0.5)) {
+        world.planets.splice(i, 1);
+        continue;
+      }
+      // Remove if far outside the world
+      if (p.x < -200 || p.y > world.height + 200 ||
+          p.x > world.width + 200 || p.y < -200) {
+        world.planets.splice(i, 1);
+      }
+    }
+  }
+
+  // Spawn a new planet if the cap allows and the interval has elapsed.
+  function maybeSpawnPlanet() {
+    if (world.planets.length >= PLANET_MAX_COUNT) return;
+    const expected = Math.floor(elapsed / PLANET_SPAWN_INTERVAL) + 3;
+    if (world.planets.length < expected) {
+      world.planets.push(spawnPlanet());
+    }
   }
 
   function makeStars() {
@@ -100,11 +151,9 @@ const SIM = (() => {
     return stars;
   }
 
-  const ASTRONAUT_ORBIT_R = 60;
-  const ASTRONAUT_ORBIT_SPEED = 1.5;
-
   function makeAstronauts() {
     const astronauts = [];
+    if (world.planets.length === 0) return astronauts;
     for (let i = 0; i < ASTRONAUT_COUNT; i++) {
       const planetIdx = i % world.planets.length;
       const planet = world.planets[planetIdx];
@@ -120,40 +169,6 @@ const SIM = (() => {
     }
     return astronauts;
   }
-
-  function savePlanets() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(world.planets));
-    } catch {
-      /* хранилище недоступно — игнорируем */
-    }
-  }
-
-  function loadPlanets() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const list = JSON.parse(raw);
-      if (!Array.isArray(list) || list.length !== 3) return false;
-      for (const p of list) {
-        if (typeof p.x !== 'number' || typeof p.y !== 'number' ||
-            typeof p.r !== 'number' || typeof p.mass !== 'number' ||
-            typeof p.color !== 'string') return false;
-        if (!(p.x > 0 && p.x < world.width && p.y > 0 && p.y < world.height)) {
-          return false;
-        }
-      }
-      world.planets = list;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  const LAUNCH_X = 1000;
-  const LAUNCH_Y = 1100;
-  const LAUNCH_VX = 0;
-  const LAUNCH_VY = -80;
 
   function updateAngle() {
     const sp = Math.hypot(satellite.vx, satellite.vy);
@@ -181,10 +196,7 @@ const SIM = (() => {
   }
 
   function init() {
-    if (!loadPlanets()) {
-      world.planets = makePlanets();
-      savePlanets();
-    }
+    world.planets = makePlanets();
     world.stars = makeStars();
     world.astronauts = makeAstronauts();
     collected = 0;
@@ -195,7 +207,6 @@ const SIM = (() => {
     world.planets = makePlanets();
     world.astronauts = makeAstronauts();
     collected = 0;
-    savePlanets();
     launch();
   }
 
@@ -205,8 +216,6 @@ const SIM = (() => {
     launch();
   }
 
-  // For testing: place the satellite at an arbitrary position with a
-  // given velocity. Resets fuel and crash state. Not used in the UI.
   function placeSatellite(x, y, vx, vy) {
     satellite.start = { x, y, vx, vy };
     satellite.x = x;
@@ -224,13 +233,6 @@ const SIM = (() => {
     updateAngle();
   }
 
-  // dirX, dirY — direction of acceleration in world coordinates (where the
-  // satellite's nose points after thrust). Exhaust comes out opposite.
-  //
-  // When the tank runs dry the engine shuts off and stays off while thrust
-  // keeps being requested: the trickle of regenerated fuel is not burnt
-  // away tick by tick, it builds up. The engine can fire again only after
-  // the controls are released (setThrustDir(null)) or the flight is reset.
   function thrust(dirX, dirY) {
     if (satellite.crashed) return false;
     if (satellite.engineCut || satellite.fuel <= 0) {
@@ -254,8 +256,6 @@ const SIM = (() => {
     return true;
   }
 
-  // setThrustDir(null) means "no thrust requested" (all controls
-  // released); it also lifts an empty-tank shut-off.
   function setThrustDir(dirX, dirY) {
     if (dirX === null) {
       satellite.thrustDir = null;
@@ -295,7 +295,6 @@ const SIM = (() => {
       ax += f * dx;
       ay += f * dy;
     }
-    // Притяжение чёрной дыры: масса постоянна, сила — как у планеты.
     const bx = BH_X - x;
     const by = BH_Y - y;
     const bd2 = bx * bx + by * by + SOFTEN2;
@@ -358,18 +357,20 @@ const SIM = (() => {
     satellite.fuel = Math.min(FUEL_MAX, satellite.fuel + FUEL_REGEN_PER_TICK);
   }
 
-  // Astronauts orbit their assigned planet on a small fixed circle.
   function stepAstronauts() {
     for (const a of world.astronauts) {
       a.orbitPhase += ASTRONAUT_ORBIT_SPEED * DT * SUBSTEPS;
       const p = world.planets[a.orbitPlanet];
+      if (!p) {
+        a.x = -1000;
+        a.y = -1000;
+        continue;
+      }
       a.x = p.x + Math.cos(a.orbitPhase) * a.orbitR;
       a.y = p.y + Math.sin(a.orbitPhase) * a.orbitR;
     }
   }
 
-  // Корабль поглощён, если оказался внутри растущего горизонта событий.
-  // Проверка на каждом подшаге, чтобы быстрый пролёт не «перескочил» дыру.
   function checkBlackHole() {
     if (satellite.crashed || satellite.consumed) return;
     const dx = satellite.x - BH_X;
@@ -382,8 +383,9 @@ const SIM = (() => {
   function step() {
     if (satellite.crashed || satellite.consumed) return;
     elapsed += DT * SUBSTEPS;
-    // Дыра растёт со скоростью BH_GROWTH_PER_SECOND ед/с игрового времени.
     blackHoleRadius = BH_INITIAL_R + BH_GROWTH_PER_SECOND * elapsed;
+    stepPlanets();
+    maybeSpawnPlanet();
     for (let i = 0; i < SUBSTEPS; i++) {
       rk4Step();
       checkAstronauts();
@@ -430,8 +432,6 @@ const SIM = (() => {
     return satellite.thrustDir !== null && satellite.fuel > 0 && !satellite.crashed;
   }
 
-  // True while the engine is shut off by an empty tank and waits for the
-  // controls to be released.
   function isEngineCut() {
     return satellite.engineCut;
   }
@@ -507,6 +507,5 @@ const SIM = (() => {
     getBlackHole,
     getWorld,
     getSatellite,
-    STORAGE_KEY,
   };
 })();

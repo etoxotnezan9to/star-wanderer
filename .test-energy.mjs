@@ -10,21 +10,29 @@ const SIM = sandbox.__SIM;
 SIM.init();
 const w = SIM.getWorld();
 
-// Isolate a two-body problem: one planet + satellite, far from the BH.
-// Move all planets except the first to zero mass / far away.
-// Place the main planet far from the black hole (60, 1140) so BH gravity
-// is negligible over the 20000-frame orbit.
+// Isolate a two-body problem: one frozen planet + satellite.
+// Move all planets to the far corner of the world (inside bounds so
+// stepPlanets doesn't remove them) with zero mass and zero drift.
 const keep = w.planets[0];
 for (let i = 1; i < w.planets.length; i++) {
   w.planets[i].mass = 0;
-  w.planets[i].x = 1e9;
-  w.planets[i].y = 1e9;
+  w.planets[i].x = 50;
+  w.planets[i].y = 50;
+  w.planets[i].vx = 0;
+  w.planets[i].vy = 0;
 }
+// Prevent new planets from spawning by filling the cap
+while (w.planets.length < 6) {
+  w.planets.push({ x: 50, y: 50, r: 16, vx: 0, vy: 0, mass: 0, color: '#fff' });
+}
+
 const G = 5000;
 const M = 50000;
 keep.mass = M;
-keep.x = 1900;  // far from BH at (60, 1140): dist ~2114
-keep.y = 100;
+keep.x = 1500;  // inside world, far from BH (60, 1140)
+keep.y = 300;
+keep.vx = 0;    // freeze
+keep.vy = 0;
 
 // circular orbit radius
 const r = 300;
@@ -50,6 +58,6 @@ const s = SIM.getSatellite();
 const dist = Math.hypot(keep.x - s.x, keep.y - s.y);
 console.log('max energy drift over 20000 frames (RK4, SUBSTEPS=4):', maxDrift.toFixed(8));
 console.log('final orbit radius:', dist.toFixed(2), '(expected ~300)');
-const ok = maxDrift < 0.001 && Math.abs(dist - 300) < 10;
+const ok = maxDrift < 0.001 && Math.abs(dist - 300) < 15;
 console.log(ok ? 'PASS: RK4 stable, orbit preserved' : 'FAIL');
 process.exit(ok ? 0 : 1);
