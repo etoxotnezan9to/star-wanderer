@@ -29,9 +29,15 @@ const SIM = (() => {
   const ASTRONAUT_COUNT = 5;
   const ASTRONAUT_RADIUS = 18;
 
-  const PORTAL_X = 1880;
-  const PORTAL_Y = 120;
-  const PORTAL_RADIUS = 45;
+  // Чёрная дыра: стоит в левом нижнем углу мира и постепенно растёт.
+  // Масса — BH_MASS (постоянная); сила притяжения — как у планеты.
+  // Радиус события r(t) = BH_INITIAL_R + BH_GROWTH_PER_SECOND * t;
+  // если космический корабль окажется внутри r — он поглощён.
+  const BH_X = 60;
+  const BH_Y = 1140;
+  const BH_MASS = 100;
+  const BH_INITIAL_R = 20;
+  const BH_GROWTH_PER_SECOND = 1.2;
 
   const world = {
     width: 2000,
@@ -54,11 +60,12 @@ const SIM = (() => {
     thrustDir: null,
     engineCut: false,
     angle: 0,
+    consumed: false,
   };
 
   let collected = 0;
   let elapsed = 0;
-  let gameWon = false;
+  let blackHoleRadius = BH_INITIAL_R;
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
@@ -164,11 +171,12 @@ const SIM = (() => {
     satellite.trail = [];
     satellite.crashed = false;
     satellite.crashedPlanet = null;
+    satellite.consumed = false;
     satellite.fuel = FUEL_MAX;
     satellite.thrustDir = null;
     satellite.engineCut = false;
     elapsed = 0;
-    gameWon = false;
+    blackHoleRadius = BH_INITIAL_R;
     updateAngle();
   }
 
@@ -208,9 +216,11 @@ const SIM = (() => {
     satellite.trail = [];
     satellite.crashed = false;
     satellite.crashedPlanet = null;
+    satellite.consumed = false;
     satellite.fuel = FUEL_MAX;
     satellite.thrustDir = null;
     satellite.engineCut = false;
+    blackHoleRadius = BH_INITIAL_R;
     updateAngle();
   }
 
@@ -285,6 +295,14 @@ const SIM = (() => {
       ax += f * dx;
       ay += f * dy;
     }
+    // Притяжение чёрной дыры: масса постоянна, сила — как у планеты.
+    const bx = BH_X - x;
+    const by = BH_Y - y;
+    const bd2 = bx * bx + by * by + SOFTEN2;
+    const binvD3 = 1 / (bd2 * Math.sqrt(bd2));
+    const bf = G * BH_MASS * binvD3;
+    ax += bf * bx;
+    ay += bf * by;
     return { ax, ay };
   }
 
@@ -350,25 +368,29 @@ const SIM = (() => {
     }
   }
 
-  function checkPortal() {
-    if (gameWon) return;
-    const dx = satellite.x - PORTAL_X;
-    const dy = satellite.y - PORTAL_Y;
-    if (dx * dx + dy * dy <= PORTAL_RADIUS * PORTAL_RADIUS) {
-      gameWon = true;
+  // Корабль поглощён, если оказался внутри растущего горизонта событий.
+  // Проверка на каждом подшаге, чтобы быстрый пролёт не «перескочил» дыру.
+  function checkBlackHole() {
+    if (satellite.crashed || satellite.consumed) return;
+    const dx = satellite.x - BH_X;
+    const dy = satellite.y - BH_Y;
+    if (dx * dx + dy * dy <= blackHoleRadius * blackHoleRadius) {
+      satellite.consumed = true;
     }
   }
 
   function step() {
-    if (satellite.crashed || gameWon) return;
+    if (satellite.crashed || satellite.consumed) return;
     elapsed += DT * SUBSTEPS;
+    // Дыра растёт со скоростью BH_GROWTH_PER_SECOND ед/с игрового времени.
+    blackHoleRadius = BH_INITIAL_R + BH_GROWTH_PER_SECOND * elapsed;
     for (let i = 0; i < SUBSTEPS; i++) {
       rk4Step();
       checkAstronauts();
       checkCrash();
       if (satellite.crashed) return;
-      checkPortal();
-      if (gameWon) return;
+      checkBlackHole();
+      if (satellite.consumed) return;
     }
     regenFuel();
     stepAstronauts();
@@ -438,12 +460,16 @@ const SIM = (() => {
     return elapsed;
   }
 
-  function isGameWon() {
-    return gameWon;
+  function isConsumed() {
+    return satellite.consumed;
   }
 
-  function getPortal() {
-    return { x: PORTAL_X, y: PORTAL_Y, r: PORTAL_RADIUS };
+  function getBlackHoleRadius() {
+    return blackHoleRadius;
+  }
+
+  function getBlackHole() {
+    return { x: BH_X, y: BH_Y, mass: BH_MASS, r: blackHoleRadius };
   }
 
   function getWorld() {
@@ -466,7 +492,7 @@ const SIM = (() => {
     step,
     speed,
     isCrashed,
-    isGameWon,
+    isConsumed,
     getFuel,
     getFuelMax,
     isThrusting,
@@ -477,7 +503,8 @@ const SIM = (() => {
     getCollected,
     getTotalAstronauts,
     getElapsed,
-    getPortal,
+    getBlackHoleRadius,
+    getBlackHole,
     getWorld,
     getSatellite,
     STORAGE_KEY,

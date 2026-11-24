@@ -50,7 +50,8 @@ for (const p of w.planets) {
   const d = Math.hypot(p.x - cx, p.y - cy);
   if (d < best) { best = d; nearest = p; }
 }
-// Compute expected net acceleration direction (sum of gravity from all planets)
+// Compute expected net acceleration direction (sum of gravity from all planets
+// plus the black hole)
 const G = 5000;
 const SOFTEN = 4;
 const SOFTEN2 = SOFTEN * SOFTEN;
@@ -61,6 +62,16 @@ for (const p of w.planets) {
   const d2 = dx * dx + dy * dy + SOFTEN2;
   const invD = 1 / Math.sqrt(d2);
   const f = (G * p.mass * invD) / d2;
+  expAx += f * dx * invD;
+  expAy += f * dy * invD;
+}
+// Black hole contribution
+{
+  const dx = 60 - cx;
+  const dy = 1140 - cy;
+  const d2 = dx * dx + dy * dy + SOFTEN2;
+  const invD = 1 / Math.sqrt(d2);
+  const f = (G * 100 * invD) / d2;
   expAx += f * dx * invD;
   expAy += f * dy * invD;
 }
@@ -248,6 +259,8 @@ check('collected starts at 0', SIM.getCollected() === 0);
 check('total astronauts is 5', SIM.getTotalAstronauts() === 5);
 
 // Test 24: touching an astronaut collects it (no fuel refuel)
+// Re-init to get fresh astronauts at known orbit positions.
+SIM.init();
 SIM.placeSatellite(100, 100, 0, 0);
 for (let i = 0; i < 20; i++) SIM.thrust(1, 0);
 const fuelAfterBurn = SIM.getFuel();
@@ -333,37 +346,61 @@ check('elapsed increased after 60 frames', SIM.getElapsed() > 0);
 check('elapsed is approximately 0.25s (60 frames * DT*SUBSTEPS)',
   Math.abs(SIM.getElapsed() - 60 * SIM.DT * 4) < 1);
 
-// Test 30: portal exists and game not won initially
-const portal = SIM.getPortal();
-check('portal has x, y, r', typeof portal.x === 'number' && typeof portal.y === 'number' && typeof portal.r === 'number');
-check('game not won initially', SIM.isGameWon() === false);
+// Test 30: black hole exists and satellite not consumed initially
+// Place satellite far from the black hole to avoid accidental consumption.
+const bh = SIM.getBlackHole();
+check('black hole has x, y, mass, r',
+  typeof bh.x === 'number' && typeof bh.y === 'number' &&
+  typeof bh.mass === 'number' && typeof bh.r === 'number');
+check('black hole is in lower-left corner (x < 100, y > 1000)',
+  bh.x < 100 && bh.y > 1000);
+SIM.placeSatellite(1000, 400, 0, 0);
+check('satellite not consumed initially', SIM.isConsumed() === false);
+check('black hole radius starts small (< 25)', SIM.getBlackHoleRadius() < 25);
 
-// Test 31: entering portal wins the game
-SIM.placeSatellite(portal.x, portal.y, 0, 0);
-SIM.step();
-check('game won after entering portal', SIM.isGameWon() === true);
-check('elapsed is frozen after win', SIM.getElapsed() > 0);
-// Further steps should not change elapsed
-const elapsedAtWin = SIM.getElapsed();
-SIM.step();
-check('elapsed unchanged after game won', SIM.getElapsed() === elapsedAtWin);
+// Test 31: black hole radius grows over time
+// BH radius = BH_INITIAL_R + BH_GROWTH_PER_SECOND * elapsed.
+// Each step() advances elapsed by DT*SUBSTEPS = 1/60 s.
+// We run 60 steps and measure the actual elapsed to verify the growth rate.
+SIM.init();
+SIM.placeSatellite(1800, 100, 0, 0);
+const rStart = SIM.getBlackHoleRadius();
+for (let i = 0; i < 60; i++) SIM.step(); // 60 frames = 1 s of game time
+const rLater = SIM.getBlackHoleRadius();
+const elapsedAfter = SIM.getElapsed();
+check('black hole radius grows over time', rLater > rStart);
+check('growth rate is approximately 1.2 units/s (within tolerance)',
+  Math.abs((rLater - rStart) / elapsedAfter - 1.2) < 0.2);
 
-// Test 32: reset after game won
+// Test 32: satellite inside black hole is consumed
+SIM.init();
+const bh2 = SIM.getBlackHole();
+SIM.placeSatellite(bh2.x, bh2.y, 0, 0);
+SIM.step();
+check('satellite consumed after entering black hole', SIM.isConsumed() === true);
+// Further steps should not change state
+const elapsedAtConsume = SIM.getElapsed();
+SIM.step();
+check('elapsed unchanged after consumed', SIM.getElapsed() === elapsedAtConsume);
+
+// Test 33: reset after consumption
 SIM.resetSatellite();
-check('reset after win: game not won', SIM.isGameWon() === false);
-check('reset after win: elapsed is 0', SIM.getElapsed() === 0);
-check('reset after win: astronauts recreated', SIM.getAstronauts().length === 5);
-check('reset after win: collected is 0', SIM.getCollected() === 0);
+check('reset after consumed: not consumed', SIM.isConsumed() === false);
+check('reset after consumed: elapsed is 0', SIM.getElapsed() === 0);
+check('reset after consumed: black hole radius back to initial',
+  SIM.getBlackHoleRadius() < 25);
+check('reset after consumed: astronauts recreated', SIM.getAstronauts().length === 5);
+check('reset after consumed: collected is 0', SIM.getCollected() === 0);
 
-// Test 33: an empty tank shuts the engine off while the keys stay held.
+// Test 34: an empty tank shuts the engine off while the keys stay held.
 // The UI calls thrust() every tick while an arrow is held and
 // setThrustDir(null) once all arrows are released. Planets are moved far
-// away and made massless for this test so gravity cannot crash the
-// satellite (astronauts still orbit them, so the list stays the same size).
+// away and made massless so planet gravity cannot crash the satellite.
+// Tolerance for vx accounts for black hole gravity pulling the satellite.
 {
-  const w33 = SIM.getWorld();
-  const savedPlanets = w33.planets;
-  w33.planets = savedPlanets.map((p) => Object.assign({}, p, { x: p.x + 1e7, mass: 0 }));
+  const w34 = SIM.getWorld();
+  const savedPlanets = w34.planets;
+  w34.planets = savedPlanets.map((p) => Object.assign({}, p, { x: p.x + 1e7, mass: 0 }));
   SIM.placeSatellite(1000, 750, 0, 0);
   let ticks = 0;
   // hold the key until the engine stops firing (at most 60 s of game time)
@@ -375,8 +412,10 @@ check('reset after win: collected is 0', SIM.getCollected() === 0);
   let firedWhileEmpty = 0;
   for (let i = 0; i < 600; i++) { if (SIM.thrust(1, 0)) firedWhileEmpty++; SIM.step(); }
   check('engine does not fire on an empty tank while the key is held', firedWhileEmpty === 0);
-  check('no acceleration on an empty tank while the key is held',
-    Math.abs(SIM.getSatellite().vx - vxEmpty) < 1e-9);
+  // BH gravity at (1000,750) with mass 100 is small (~0.48/tick force),
+  // over 600 ticks that's ~5 units of vx change.
+  check('no engine acceleration on an empty tank (only BH gravity)',
+    Math.abs(SIM.getSatellite().vx - vxEmpty) < 10);
   check('isThrusting false on an empty tank while the key is held', SIM.isThrusting() === false);
   check('fuel regenerates while the engine is off', SIM.getFuel() > 1);
   check('isEngineCut reports the shut-off engine', SIM.isEngineCut() === true);
@@ -389,7 +428,7 @@ check('reset after win: collected is 0', SIM.getCollected() === 0);
   check('engine shut off again before reset', SIM.isEngineCut() === true);
   SIM.resetSatellite();
   check('reset clears the shut-off', SIM.isEngineCut() === false && SIM.thrust(1, 0) === true);
-  w33.planets = savedPlanets;
+  w34.planets = savedPlanets;
 }
 
 console.log(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');

@@ -627,51 +627,68 @@
     ctx.textAlign = 'left';
   }
 
-  function drawPortal() {
-    const p = SIM.getPortal();
-    const c = toScreen(p.x, p.y);
-    const r = p.r * camera.zoom;
-    if (c.x < -r - 50 || c.x > canvas.width / (window.devicePixelRatio || 1) + r + 50 ||
-        c.y < -r - 50 || c.y > canvas.height / (window.devicePixelRatio || 1) + r + 50) return;
+  function drawBlackHole() {
+    const bh = SIM.getBlackHole();
+    const c = toScreen(bh.x, bh.y);
+    const r = bh.r * camera.zoom;
+    if (r < 1) return; // слишком мала, чтобы рисовать
+    const dpr = window.devicePixelRatio || 1;
+    const sw = canvas.width / dpr;
+    const sh = canvas.height / dpr;
+    if (c.x < -r * 2.5 - 50 || c.x > sw + r * 2.5 + 50 ||
+        c.y < -r * 2.5 - 50 || c.y > sh + r * 2.5 + 50) return;
     const t = performance.now() / 1000;
-    // Outer glow
-    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.3, c.x, c.y, r * 1.8);
-    glow.addColorStop(0, 'rgba(120, 60, 255, 0.4)');
-    glow.addColorStop(0.5, 'rgba(80, 120, 255, 0.15)');
-    glow.addColorStop(1, 'rgba(60, 60, 200, 0)');
+
+    // 1. Свечение аккреционного диска — тёплое кольцо вокруг горизонта.
+    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.6, c.x, c.y, r * 2.4);
+    glow.addColorStop(0, 'rgba(255, 180, 80, 0)');
+    glow.addColorStop(0.35, 'rgba(255, 150, 60, 0.35)');
+    glow.addColorStop(0.55, 'rgba(255, 100, 40, 0.18)');
+    glow.addColorStop(1, 'rgba(120, 40, 20, 0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 1.8, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, r * 2.4, 0, Math.PI * 2);
     ctx.fill();
-    // Swirling ring
+
+    // 2. Вращающиеся дуги аккреции — три дуги, каждая быстрее другой.
     for (let i = 0; i < 3; i++) {
-      const angle = t * (1.5 + i * 0.5) + i * Math.PI * 2 / 3;
-      const ringR = r * (0.7 + i * 0.15);
-      ctx.strokeStyle = 'rgba(' + (100 + i * 40) + ', ' + (60 + i * 50) + ', 255, ' + (0.5 - i * 0.1) + ')';
-      ctx.lineWidth = 3;
+      const angle = t * (2.0 + i * 0.7) + i * Math.PI * 2 / 3;
+      const ringR = r * (1.15 + i * 0.25);
+      const hue = 25 - i * 6;
+      ctx.strokeStyle = 'hsla(' + hue + ', 95%, ' + (55 + i * 6) + '%, ' + (0.7 - i * 0.15) + ')';
+      ctx.lineWidth = 2.5 + i;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.arc(c.x, c.y, ringR, angle, angle + Math.PI * 1.2);
+      ctx.arc(c.x, c.y, ringR, angle, angle + Math.PI * 0.9);
       ctx.stroke();
     }
-    // Core
-    const core = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r * 0.6);
-    core.addColorStop(0, 'rgba(200, 180, 255, 0.9)');
-    core.addColorStop(0.5, 'rgba(120, 80, 255, 0.6)');
-    core.addColorStop(1, 'rgba(60, 40, 200, 0)');
-    ctx.fillStyle = core;
+
+    // 3. Горизонт событий — чёрный диск.
+    ctx.fillStyle = '#000000';
     ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 0.6, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
     ctx.fill();
-    // Label
-    ctx.fillStyle = 'rgba(180, 160, 255, 0.8)';
+
+    // 4. Кромка горизонта — тонкое яркое кольцо.
+    const rim = ctx.createRadialGradient(c.x, c.y, r * 0.92, c.x, c.y, r * 1.08);
+    rim.addColorStop(0, 'rgba(255, 200, 120, 0)');
+    rim.addColorStop(0.7, 'rgba(255, 200, 120, 0.7)');
+    rim.addColorStop(1, 'rgba(255, 200, 120, 0)');
+    ctx.fillStyle = rim;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, r * 1.08, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 5. Подпись над дырой.
+    ctx.fillStyle = 'rgba(255, 200, 140, 0.85)';
     ctx.font = '12px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Портал', c.x, c.y - r - 8);
+    ctx.fillText('Чёрная дыра', c.x, c.y - r * 1.3 - 8);
     ctx.textAlign = 'left';
   }
 
   function drawGameOver() {
-    if (!SIM.isGameWon()) return;
+    if (!sat.crashed && !SIM.isConsumed()) return;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
@@ -684,7 +701,7 @@
     const px = (w - pw) / 2;
     const py = (h - ph) / 2;
     ctx.fillStyle = 'rgba(15, 20, 40, 0.95)';
-    ctx.strokeStyle = 'rgba(120, 100, 255, 0.6)';
+    ctx.strokeStyle = sat.crashed ? 'rgba(255, 120, 80, 0.6)' : 'rgba(255, 160, 60, 0.6)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(px, py, pw, ph, 12);
@@ -694,7 +711,7 @@
     ctx.fillStyle = 'rgba(220, 200, 255, 0.95)';
     ctx.font = 'bold 24px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Игра завершена!', w / 2, py + 40);
+    ctx.fillText('Полёт завершён', w / 2, py + 40);
     // Stats
     const collected = SIM.getCollected();
     const total = SIM.getTotalAstronauts();
@@ -703,8 +720,13 @@
     const secs = Math.floor(elapsed % 60);
     ctx.font = '18px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(180, 200, 230, 0.9)';
-    ctx.fillText('Космонавты: ' + collected + ' / ' + total, w / 2, py + 80);
-    ctx.fillText('Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
+    if (sat.crashed) {
+      ctx.fillText('Спутник упал на планету', w / 2, py + 80);
+    } else {
+      ctx.fillText('Корабль поглощён чёрной дырой', w / 2, py + 80);
+    }
+    ctx.fillText('Космонавты: ' + collected + ' / ' + total +
+      '   Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
     // Prompt
     ctx.fillStyle = 'rgba(255, 220, 100, 0.9)';
     ctx.font = '14px system-ui, sans-serif';
@@ -718,12 +740,17 @@
     if (sat.crashed) {
       ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
       ctx.fillText('Спутник упал на планету — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
-    } else if (!SIM.isGameWon()) {
+    } else if (SIM.isConsumed()) {
+      ctx.fillStyle = 'rgba(255, 180, 100, 0.95)';
+      ctx.fillText('Корабль поглощён чёрной дырой — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
+    } else {
       ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
       const elapsed = SIM.getElapsed();
       const mins = Math.floor(elapsed / 60);
       const secs = Math.floor(elapsed % 60);
-      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0'), 16, window.innerHeight - 16);
+      const bhR = SIM.getBlackHoleRadius();
+      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0') +
+        '   Дыра: ' + bhR.toFixed(1), 16, window.innerHeight - 16);
     }
     drawFuelBar();
     drawAstronautCounter();
@@ -732,7 +759,7 @@
   // One fixed simulation tick (SIM.TICK seconds of game time): thrust,
   // physics, fuel and exhaust particles all advance by the same amount.
   function tick() {
-    if (!sat.crashed && !SIM.isGameWon()) {
+    if (!sat.crashed && !SIM.isConsumed()) {
       const dir = currentThrustDir();
       if (dir) {
         SIM.thrust(dir.x, dir.y);
@@ -768,13 +795,13 @@
     ctx.fillStyle = '#04060d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawStars();
-    drawPortal();
+    drawBlackHole();
     drawTrail();
     drawAstronauts();
     drawPlanets();
     if (sat.crashed) {
       drawCrashMarker();
-    } else {
+    } else if (!SIM.isConsumed()) {
       drawSatellite();
     }
     drawParticles();
@@ -834,7 +861,7 @@
   window.addEventListener('resize', resize);
 
   window.addEventListener('keydown', (e) => {
-    if (sat.crashed || SIM.isGameWon()) {
+    if (sat.crashed || SIM.isConsumed()) {
       SIM.resetSatellite();
       keysDown.clear();
       return;
