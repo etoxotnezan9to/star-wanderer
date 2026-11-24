@@ -4,7 +4,6 @@ const SIM = (() => {
   const G = 5000;
   const DT = 1 / 240;
   const SUBSTEPS = 4;
-  // Simulated time advanced by one step(): 1/60 s of game time.
   const TICK = DT * SUBSTEPS;
   const SOFTEN = 4;
   const SOFTEN2 = SOFTEN * SOFTEN;
@@ -12,15 +11,14 @@ const SIM = (() => {
   const PLANET_MAX_R = 42;
   const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
   const MAX_TRAIL = 4000;
-  // Planets spawn at a random position just outside the screen boundary
-  // (at a random angle around the black hole center) and drift towards it
-  // at a constant velocity (uniform motion — only the satellite feels gravity).
-  const PLANET_SPAWN_MARGIN = 80; // how far outside the boundary
-  const PLANET_DRIFT_SPEED = 12; // units per second of game time
-  const PLANET_MAX_COUNT = 3;
+  // Planets spawn just outside the world boundary at a random position on
+  // the perimeter and drift towards the black hole center at a constant
+  // velocity (uniform motion — only the satellite feels gravity).
+  const PLANET_SPAWN_MARGIN = 100; // how far outside the boundary
+  const PLANET_DRIFT_SPEED = 12; // units per second, towards the center
+  const PLANET_MAX_COUNT = 4;
   const PLANET_SPAWN_INTERVAL = 3; // seconds of game time between spawns
 
-  // Fuel tuning.
   const FUEL_MAX = 100;
   const FUEL_BURN_PER_SECOND = 15;
   const FUEL_REGEN_PER_SECOND = 0.15;
@@ -33,18 +31,20 @@ const SIM = (() => {
   const ASTRONAUT_ORBIT_R = 60;
   const ASTRONAUT_ORBIT_SPEED = 1.5;
 
-  // Чёрная дыра: стоит в центре мира (1000, 600) и постепенно растёт.
-  // Планеты генерируются случайным образом вокруг неё и дрейфуют к ней.
+  // Чёрная дыра — в центре мира. Радиус горизонта событий: корабль,
+  // пересёкший его, поглощён (полёт завершён).
   const BH_X = 1000;
   const BH_Y = 600;
-  const BH_MASS = 100;
-  const BH_INITIAL_R = 20;
-  const BH_GROWTH_PER_SECOND = 1.2;
+  const BH_RADIUS = 120;
+  // Гравитация дыры: притягивает корабль (планеты не чувствует — они
+  // дрейфуют равномерно).
+  const BH_MASS = 5000;
 
-  const LAUNCH_X = 1000;
-  const LAUNCH_Y = 1150;
+  // Старт — в стороне от центра (на 700 ед. от дыры, вправо).
+  const LAUNCH_X = BH_X + 700;
+  const LAUNCH_Y = BH_Y;
   const LAUNCH_VX = 0;
-  const LAUNCH_VY = -80;
+  const LAUNCH_VY = 0;
 
   const world = {
     width: 2000,
@@ -72,33 +72,30 @@ const SIM = (() => {
 
   let collected = 0;
   let elapsed = 0;
-  let blackHoleRadius = BH_INITIAL_R;
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
   }
 
-  // Create a new planet just outside the screen boundary at a random angle
-  // around the black hole center, with a drift velocity towards it.
+  // Create a new planet just outside the world boundary at a random point
+  // on the perimeter, drifting towards the black hole center.
   function spawnPlanet() {
     const r = rand(PLANET_MIN_R, PLANET_MAX_R);
-    // Pick a random angle and find where the ray from BH center at that angle
-    // exits the screen, then push the planet a bit further out.
+    // Pick a random angle from the center; find where the ray exits the
+    // world rectangle and push the planet a bit further out.
     const angle = rand(0, Math.PI * 2);
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
-    // Distance from center to screen edge along this ray
     const halfW = world.width / 2;
     const halfH = world.height / 2;
     let tEdge = Infinity;
-    if (dx > 1e-9) tEdge = Math.min(tEdge, (halfW) / dx);
-    if (dx < -1e-9) tEdge = Math.min(tEdge, (halfW) / -dx);
-    if (dy > 1e-9) tEdge = Math.min(tEdge, (halfH) / dy);
-    if (dy < -1e-9) tEdge = Math.min(tEdge, (halfH) / -dy);
+    if (dx > 1e-9) tEdge = Math.min(tEdge, halfW / dx);
+    if (dx < -1e-9) tEdge = Math.min(tEdge, halfW / -dx);
+    if (dy > 1e-9) tEdge = Math.min(tEdge, halfH / dy);
+    if (dy < -1e-9) tEdge = Math.min(tEdge, halfH / -dy);
     const dist = tEdge + PLANET_SPAWN_MARGIN;
     const x = BH_X + dx * dist;
     const y = BH_Y + dy * dist;
-    // Direction from (x, y) to the black hole (always towards center)
     return {
       x, y, r,
       vx: -dx * PLANET_DRIFT_SPEED,
@@ -110,41 +107,37 @@ const SIM = (() => {
 
   function makePlanets() {
     const planets = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 4; i++) {
       planets.push(spawnPlanet());
     }
     return planets;
   }
 
-  // Advance planets by their drift velocity. Remove planets absorbed by the
-  // black hole or that have passed far beyond the opposite edge.
+  // Advance planets by their drift velocity. Remove planets swallowed by
+  // the black hole (center inside the event horizon) or that have strayed
+  // far beyond the world.
   function stepPlanets() {
     const dt = DT * SUBSTEPS;
     for (let i = world.planets.length - 1; i >= 0; i--) {
       const p = world.planets[i];
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      // Remove if swallowed by the black hole (center within BH radius + planet r)
       const dx = p.x - BH_X;
       const dy = p.y - BH_Y;
-      if (dx * dx + dy * dy <= (blackHoleRadius + p.r * 0.5) * (blackHoleRadius + p.r * 0.5)) {
+      if (dx * dx + dy * dy <= BH_RADIUS * BH_RADIUS) {
         world.planets.splice(i, 1);
         continue;
       }
-      // Remove if far beyond the world on the opposite side (passed through BH)
-      // or too far outside (shouldn't happen, but safety)
-      const distFromCenter = Math.hypot(p.x - BH_X, p.y - BH_Y);
-      const maxDist = Math.hypot(world.width / 2, world.height / 2) + 200;
-      if (distFromCenter > maxDist) {
+      if (Math.hypot(p.x - BH_X, p.y - BH_Y) >
+          Math.hypot(world.width / 2, world.height / 2) + 400) {
         world.planets.splice(i, 1);
       }
     }
   }
 
-  // Spawn a new planet if the cap allows and the interval has elapsed.
   function maybeSpawnPlanet() {
     if (world.planets.length >= PLANET_MAX_COUNT) return;
-    const expected = Math.floor(elapsed / PLANET_SPAWN_INTERVAL) + 3;
+    const expected = Math.floor(elapsed / PLANET_SPAWN_INTERVAL) + 4;
     if (world.planets.length < expected) {
       world.planets.push(spawnPlanet());
     }
@@ -204,7 +197,6 @@ const SIM = (() => {
     satellite.thrustDir = null;
     satellite.engineCut = false;
     elapsed = 0;
-    blackHoleRadius = BH_INITIAL_R;
     updateAngle();
   }
 
@@ -242,7 +234,6 @@ const SIM = (() => {
     satellite.fuel = FUEL_MAX;
     satellite.thrustDir = null;
     satellite.engineCut = false;
-    blackHoleRadius = BH_INITIAL_R;
     updateAngle();
   }
 
@@ -308,6 +299,7 @@ const SIM = (() => {
       ax += f * dx;
       ay += f * dy;
     }
+    // Притяжение чёрной дыры в центре (только корабль).
     const bx = BH_X - x;
     const by = BH_Y - y;
     const bd2 = bx * bx + by * by + SOFTEN2;
@@ -321,31 +313,14 @@ const SIM = (() => {
   function rk4Step() {
     const { x, y, vx, vy } = satellite;
     const h = DT;
-
     const a1 = accelAt(x, y);
-    const k1x = vx;
-    const k1y = vy;
-    const k1vx = a1.ax;
-    const k1vy = a1.ay;
-
+    const k1x = vx, k1y = vy, k1vx = a1.ax, k1vy = a1.ay;
     const a2 = accelAt(x + k1x * h / 2, y + k1y * h / 2);
-    const k2x = vx + k1vx * h / 2;
-    const k2y = vy + k1vy * h / 2;
-    const k2vx = a2.ax;
-    const k2vy = a2.ay;
-
+    const k2x = vx + k1vx * h / 2, k2y = vy + k1vy * h / 2, k2vx = a2.ax, k2vy = a2.ay;
     const a3 = accelAt(x + k2x * h / 2, y + k2y * h / 2);
-    const k3x = vx + k2vx * h / 2;
-    const k3y = vy + k2vy * h / 2;
-    const k3vx = a3.ax;
-    const k3vy = a3.ay;
-
+    const k3x = vx + k2vx * h / 2, k3y = vy + k2vy * h / 2, k3vx = a3.ax, k3vy = a3.ay;
     const a4 = accelAt(x + k3x * h, y + k3y * h);
-    const k4x = vx + k3vx * h;
-    const k4y = vy + k3vy * h;
-    const k4vx = a4.ax;
-    const k4vy = a4.ay;
-
+    const k4x = vx + k3vx * h, k4y = vy + k3vy * h, k4vx = a4.ax, k4vy = a4.ay;
     satellite.x = x + (h / 6) * (k1x + 2 * k2x + 2 * k3x + k4x);
     satellite.y = y + (h / 6) * (k1y + 2 * k2y + 2 * k3y + k4y);
     satellite.vx = vx + (h / 6) * (k1vx + 2 * k2vx + 2 * k3vx + k4vx);
@@ -374,21 +349,19 @@ const SIM = (() => {
     for (const a of world.astronauts) {
       a.orbitPhase += ASTRONAUT_ORBIT_SPEED * DT * SUBSTEPS;
       const p = world.planets[a.orbitPlanet];
-      if (!p) {
-        a.x = -1000;
-        a.y = -1000;
-        continue;
-      }
+      if (!p) { a.x = -1000; a.y = -1000; continue; }
       a.x = p.x + Math.cos(a.orbitPhase) * a.orbitR;
       a.y = p.y + Math.sin(a.orbitPhase) * a.orbitR;
     }
   }
 
-  function checkBlackHole() {
+  // The black hole in the center: if the satellite crosses the event
+  // horizon (distance from center < BH_RADIUS) it is consumed.
+  function checkEventHorizon() {
     if (satellite.crashed || satellite.consumed) return;
     const dx = satellite.x - BH_X;
     const dy = satellite.y - BH_Y;
-    if (dx * dx + dy * dy <= blackHoleRadius * blackHoleRadius) {
+    if (dx * dx + dy * dy <= BH_RADIUS * BH_RADIUS) {
       satellite.consumed = true;
     }
   }
@@ -396,7 +369,6 @@ const SIM = (() => {
   function step() {
     if (satellite.crashed || satellite.consumed) return;
     elapsed += DT * SUBSTEPS;
-    blackHoleRadius = BH_INITIAL_R + BH_GROWTH_PER_SECOND * elapsed;
     stepPlanets();
     maybeSpawnPlanet();
     for (let i = 0; i < SUBSTEPS; i++) {
@@ -404,7 +376,7 @@ const SIM = (() => {
       checkAstronauts();
       checkCrash();
       if (satellite.crashed) return;
-      checkBlackHole();
+      checkEventHorizon();
       if (satellite.consumed) return;
     }
     regenFuel();
@@ -416,109 +388,41 @@ const SIM = (() => {
       const dy = satellite.y - last.y;
       if (dx * dx + dy * dy > 9) {
         satellite.trail.push({ x: satellite.x, y: satellite.y });
-        if (satellite.trail.length > MAX_TRAIL) {
-          satellite.trail.shift();
-        }
+        if (satellite.trail.length > MAX_TRAIL) satellite.trail.shift();
       }
     } else {
       satellite.trail.push({ x: satellite.x, y: satellite.y });
     }
   }
 
-  function speed() {
-    return Math.hypot(satellite.vx, satellite.vy);
-  }
-
-  function isCrashed() {
-    return satellite.crashed;
-  }
-
-  function getFuel() {
-    return satellite.fuel;
-  }
-
-  function getFuelMax() {
-    return FUEL_MAX;
-  }
-
+  function speed() { return Math.hypot(satellite.vx, satellite.vy); }
+  function isCrashed() { return satellite.crashed; }
+  function isConsumed() { return satellite.consumed; }
+  function getFuel() { return satellite.fuel; }
+  function getFuelMax() { return FUEL_MAX; }
   function isThrusting() {
     return satellite.thrustDir !== null && satellite.fuel > 0 && !satellite.crashed;
   }
-
-  function isEngineCut() {
-    return satellite.engineCut;
-  }
-
-  function getThrustDir() {
-    return satellite.thrustDir;
-  }
-
-  function getAngle() {
-    return satellite.angle;
-  }
-
-  function getAstronauts() {
-    return world.astronauts;
-  }
-
-  function getCollected() {
-    return collected;
-  }
-
-  function getTotalAstronauts() {
-    return ASTRONAUT_COUNT;
-  }
-
-  function getElapsed() {
-    return elapsed;
-  }
-
-  function isConsumed() {
-    return satellite.consumed;
-  }
-
-  function getBlackHoleRadius() {
-    return blackHoleRadius;
-  }
-
-  function getBlackHole() {
-    return { x: BH_X, y: BH_Y, mass: BH_MASS, r: blackHoleRadius };
-  }
-
-  function getWorld() {
-    return world;
-  }
-
-  function getSatellite() {
-    return satellite;
-  }
+  function isEngineCut() { return satellite.engineCut; }
+  function getThrustDir() { return satellite.thrustDir; }
+  function getAngle() { return satellite.angle; }
+  function getAstronauts() { return world.astronauts; }
+  function getCollected() { return collected; }
+  function getTotalAstronauts() { return ASTRONAUT_COUNT; }
+  function getElapsed() { return elapsed; }
+  function getWorld() { return world; }
+  function getSatellite() { return satellite; }
+  function getBlackHole() { return { x: BH_X, y: BH_Y, r: BH_RADIUS }; }
+  function getBlackHoleMass() { return BH_MASS; }
 
   return {
-    DT,
-    TICK,
-    init,
-    randomizePlanets,
-    placeSatellite,
-    resetSatellite,
-    thrust,
-    setThrustDir,
-    step,
-    speed,
-    isCrashed,
-    isConsumed,
-    getFuel,
-    getFuelMax,
-    isThrusting,
-    isEngineCut,
-    getThrustDir,
-    getAngle,
-    getAstronauts,
-    getCollected,
-    getTotalAstronauts,
-    getElapsed,
-    getBlackHoleRadius,
-    getBlackHole,
-    getWorld,
-    getSatellite,
+    DT, TICK,
+    init, randomizePlanets, placeSatellite, resetSatellite,
+    thrust, setThrustDir, step,
+    speed, isCrashed, isConsumed,
+    getFuel, getFuelMax, isThrusting, isEngineCut,
+    getThrustDir, getAngle,
+    getAstronauts, getCollected, getTotalAstronauts, getElapsed,
+    getWorld, getSatellite, getBlackHole, getBlackHoleMass,
   };
 })();

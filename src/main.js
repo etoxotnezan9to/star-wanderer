@@ -21,8 +21,6 @@
   const keysDown = new Set();
   const particles = [];
 
-  const MIN_ZOOM = 0.05;
-  const MAX_ZOOM = 20;
   const PARTICLE_LIFE = 30;
   const PARTICLE_COUNT_PER_FRAME = 3;
   // Trail look: opacity next to the satellite, distance (world units)
@@ -31,6 +29,25 @@
   const TRAIL_ALPHA = 0.7;
   const TRAIL_FADE_DISTANCE = 3000;
   const TRAIL_FADE_STEPS = 64;
+
+  // The camera is locked to a fixed world scale (no zoom) and follows the
+  // ship: it always shows the region on the ship's side of the black hole,
+  // so the event-horizon edge appears only at the screen border. The view
+  // center is the midpoint between the horizon edge (on the ship–hole line)
+  // and the ship, which puts the horizon edge exactly on one screen border.
+  const SCALE = 0.5; // screen pixels per world unit, fixed
+
+  function updateCamera() {
+    const bh = SIM.getBlackHole();
+    const dxs = sat.x - bh.x;
+    const dys = sat.y - bh.y;
+    const ds = Math.hypot(dxs, dys) || 1;
+    const ex = bh.x + (dxs / ds) * bh.r;
+    const ey = bh.y + (dys / ds) * bh.r;
+    camera.x = (ex + sat.x) / 2;
+    camera.y = (ey + sat.y) / 2;
+    camera.zoom = SCALE;
+  }
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -41,16 +58,6 @@
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  function fitCamera() {
-    const dpr = 1;
-    const w = canvas.width / dpr;
-    const h = canvas.height / dpr;
-    if (w <= 0 || h <= 0) return;
-    camera.zoom = Math.min(w / world.width, h / world.height);
-    camera.x = world.width / 2;
-    camera.y = world.height / 2;
   }
 
   function toScreen(px, py) {
@@ -627,64 +634,59 @@
     ctx.textAlign = 'left';
   }
 
-  function drawBlackHole() {
+  // Draw the black hole in the world center: a black disk (event horizon)
+  // with a glowing rim and a slow accretion swirl. With the camera framing,
+  // only the edge of this disk is visible — it lands on the screen border.
+  function drawEventHorizon() {
     const bh = SIM.getBlackHole();
     const c = toScreen(bh.x, bh.y);
     const r = bh.r * camera.zoom;
-    if (r < 1) return; // слишком мала, чтобы рисовать
     const dpr = window.devicePixelRatio || 1;
     const sw = canvas.width / dpr;
     const sh = canvas.height / dpr;
-    if (c.x < -r * 2.5 - 50 || c.x > sw + r * 2.5 + 50 ||
-        c.y < -r * 2.5 - 50 || c.y > sh + r * 2.5 + 50) return;
+    if (c.x < -r * 1.6 - 60 || c.x > sw + r * 1.6 + 60 ||
+        c.y < -r * 1.6 - 60 || c.y > sh + r * 1.6 + 60) return;
     const t = performance.now() / 1000;
 
-    // 1. Свечение аккреционного диска — тёплое кольцо вокруг горизонта.
-    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.6, c.x, c.y, r * 2.4);
-    glow.addColorStop(0, 'rgba(255, 180, 80, 0)');
-    glow.addColorStop(0.35, 'rgba(255, 150, 60, 0.35)');
-    glow.addColorStop(0.55, 'rgba(255, 100, 40, 0.18)');
+    // 1. Warm glow of the accretion disc around the horizon.
+    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.8, c.x, c.y, r * 1.9);
+    glow.addColorStop(0, 'rgba(255, 170, 80, 0)');
+    glow.addColorStop(0.5, 'rgba(255, 140, 60, 0.28)');
+    glow.addColorStop(0.8, 'rgba(255, 100, 40, 0.12)');
     glow.addColorStop(1, 'rgba(120, 40, 20, 0)');
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 2.4, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, r * 1.9, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. Вращающиеся дуги аккреции — три дуги, каждая быстрее другой.
+    // 2. Swirling arcs of the accretion disc.
     for (let i = 0; i < 3; i++) {
-      const angle = t * (2.0 + i * 0.7) + i * Math.PI * 2 / 3;
-      const ringR = r * (1.15 + i * 0.25);
-      const hue = 25 - i * 6;
-      ctx.strokeStyle = 'hsla(' + hue + ', 95%, ' + (55 + i * 6) + '%, ' + (0.7 - i * 0.15) + ')';
-      ctx.lineWidth = 2.5 + i;
+      const angle = t * (1.6 + i * 0.5) + i * Math.PI * 2 / 3;
+      const ringR = r * (1.12 + i * 0.18);
+      ctx.strokeStyle = 'hsla(' + (28 - i * 6) + ', 95%, ' + (55 + i * 6) + '%, ' +
+        (0.55 - i * 0.12) + ')';
+      ctx.lineWidth = 2 + i;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.arc(c.x, c.y, ringR, angle, angle + Math.PI * 0.9);
       ctx.stroke();
     }
 
-    // 3. Горизонт событий — чёрный диск.
+    // 3. The horizon itself — a black disk.
     ctx.fillStyle = '#000000';
     ctx.beginPath();
     ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // 4. Кромка горизонта — тонкое яркое кольцо.
-    const rim = ctx.createRadialGradient(c.x, c.y, r * 0.92, c.x, c.y, r * 1.08);
+    // 4. Bright rim of the horizon.
+    const rim = ctx.createRadialGradient(c.x, c.y, r * 0.94, c.x, c.y, r * 1.1);
     rim.addColorStop(0, 'rgba(255, 200, 120, 0)');
-    rim.addColorStop(0.7, 'rgba(255, 200, 120, 0.7)');
+    rim.addColorStop(0.6, 'rgba(255, 200, 120, 0.65)');
     rim.addColorStop(1, 'rgba(255, 200, 120, 0)');
     ctx.fillStyle = rim;
     ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 1.08, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, r * 1.1, 0, Math.PI * 2);
     ctx.fill();
-
-    // 5. Подпись над дырой.
-    ctx.fillStyle = 'rgba(255, 200, 140, 0.85)';
-    ctx.font = '12px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Чёрная дыра', c.x, c.y - r * 1.3 - 8);
-    ctx.textAlign = 'left';
   }
 
   function drawGameOver() {
@@ -723,7 +725,7 @@
     if (sat.crashed) {
       ctx.fillText('Спутник упал на планету', w / 2, py + 80);
     } else {
-      ctx.fillText('Корабль поглощён чёрной дырой', w / 2, py + 80);
+      ctx.fillText('Корабль пересёк горизонт событий', w / 2, py + 80);
     }
     ctx.fillText('Космонавты: ' + collected + ' / ' + total +
       '   Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
@@ -741,16 +743,14 @@
       ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
       ctx.fillText('Спутник упал на планету — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
     } else if (SIM.isConsumed()) {
-      ctx.fillStyle = 'rgba(255, 180, 100, 0.95)';
-      ctx.fillText('Корабль поглощён чёрной дырой — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
+      ctx.fillStyle = 'rgba(255, 180, 120, 0.95)';
+      ctx.fillText('Корабль пересёк горизонт событий чёрной дыры — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
     } else {
       ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
       const elapsed = SIM.getElapsed();
       const mins = Math.floor(elapsed / 60);
       const secs = Math.floor(elapsed % 60);
-      const bhR = SIM.getBlackHoleRadius();
-      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0') +
-        '   Дыра: ' + bhR.toFixed(1), 16, window.innerHeight - 16);
+      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0'), 16, window.innerHeight - 16);
     }
     drawFuelBar();
     drawAstronautCounter();
@@ -792,10 +792,11 @@
       tick();
       accumulator -= SIM.TICK;
     }
+    updateCamera();
     ctx.fillStyle = '#04060d';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     drawStars();
-    drawBlackHole();
+    drawEventHorizon();
     drawTrail();
     drawAstronauts();
     drawPlanets();
@@ -809,16 +810,6 @@
     drawGameOver();
     requestAnimationFrame(frame);
   }
-
-  canvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const before = toWorld(e.offsetX, e.offsetY);
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    camera.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, camera.zoom * factor));
-    const after = toWorld(e.offsetX, e.offsetY);
-    camera.x += before.x - after.x;
-    camera.y += before.y - after.y;
-  }, { passive: false });
 
   const panel = document.getElementById('panel');
 
@@ -850,14 +841,6 @@
     SIM.randomizePlanets();
   });
 
-  document.getElementById('btnZoomIn').addEventListener('click', () => {
-    camera.zoom = Math.min(MAX_ZOOM, camera.zoom * 1.4);
-  });
-
-  document.getElementById('btnZoomOut').addEventListener('click', () => {
-    camera.zoom = Math.max(MIN_ZOOM, camera.zoom / 1.4);
-  });
-
   window.addEventListener('resize', resize);
 
   window.addEventListener('keydown', (e) => {
@@ -883,7 +866,7 @@
   });
 
   resize();
-  fitCamera();
   SIM.init();
+  updateCamera();
   requestAnimationFrame(frame);
 })();
