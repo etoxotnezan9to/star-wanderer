@@ -12,13 +12,12 @@ const SIM = (() => {
   const PLANET_MAX_R = 42;
   const PLANET_COLORS = ['#e8b04b', '#6fb3e8', '#d97b6c', '#8fd6a4', '#c79be0'];
   const MAX_TRAIL = 4000;
-  // Planets spawn in the upper-right corner and drift towards the black hole
+  // Planets spawn at a random position just outside the screen boundary
+  // (at a random angle around the black hole center) and drift towards it
   // at a constant velocity (uniform motion — only the satellite feels gravity).
-  const PLANET_SPAWN_X = 1900;
-  const PLANET_SPAWN_Y = 120;
-  const PLANET_SPAWN_SPREAD = 250;
+  const PLANET_SPAWN_MARGIN = 80; // how far outside the boundary
   const PLANET_DRIFT_SPEED = 12; // units per second of game time
-  const PLANET_MAX_COUNT = 6;
+  const PLANET_MAX_COUNT = 3;
   const PLANET_SPAWN_INTERVAL = 3; // seconds of game time between spawns
 
   // Fuel tuning.
@@ -34,16 +33,16 @@ const SIM = (() => {
   const ASTRONAUT_ORBIT_R = 60;
   const ASTRONAUT_ORBIT_SPEED = 1.5;
 
-  // Чёрная дыра: стоит в левом нижнем углу мира и постепенно растёт.
-  // Планеты генерируются в правом верхнем углу и равномерно дрейфуют к ней.
-  const BH_X = 60;
-  const BH_Y = 1140;
+  // Чёрная дыра: стоит в центре мира (1000, 600) и постепенно растёт.
+  // Планеты генерируются случайным образом вокруг неё и дрейфуют к ней.
+  const BH_X = 1000;
+  const BH_Y = 600;
   const BH_MASS = 100;
   const BH_INITIAL_R = 20;
   const BH_GROWTH_PER_SECOND = 1.2;
 
   const LAUNCH_X = 1000;
-  const LAUNCH_Y = 1100;
+  const LAUNCH_Y = 1150;
   const LAUNCH_VX = 0;
   const LAUNCH_VY = -80;
 
@@ -79,19 +78,31 @@ const SIM = (() => {
     return min + Math.random() * (max - min);
   }
 
-  // Create a new planet in the upper-right corner with a drift velocity
-  // towards the black hole (constant speed).
+  // Create a new planet just outside the screen boundary at a random angle
+  // around the black hole center, with a drift velocity towards it.
   function spawnPlanet() {
     const r = rand(PLANET_MIN_R, PLANET_MAX_R);
-    const x = PLANET_SPAWN_X - rand(0, PLANET_SPAWN_SPREAD);
-    const y = PLANET_SPAWN_Y + rand(0, PLANET_SPAWN_SPREAD);
-    const dx = BH_X - x;
-    const dy = BH_Y - y;
-    const d = Math.hypot(dx, dy);
+    // Pick a random angle and find where the ray from BH center at that angle
+    // exits the screen, then push the planet a bit further out.
+    const angle = rand(0, Math.PI * 2);
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    // Distance from center to screen edge along this ray
+    const halfW = world.width / 2;
+    const halfH = world.height / 2;
+    let tEdge = Infinity;
+    if (dx > 1e-9) tEdge = Math.min(tEdge, (halfW) / dx);
+    if (dx < -1e-9) tEdge = Math.min(tEdge, (halfW) / -dx);
+    if (dy > 1e-9) tEdge = Math.min(tEdge, (halfH) / dy);
+    if (dy < -1e-9) tEdge = Math.min(tEdge, (halfH) / -dy);
+    const dist = tEdge + PLANET_SPAWN_MARGIN;
+    const x = BH_X + dx * dist;
+    const y = BH_Y + dy * dist;
+    // Direction from (x, y) to the black hole (always towards center)
     return {
       x, y, r,
-      vx: (dx / d) * PLANET_DRIFT_SPEED,
-      vy: (dy / d) * PLANET_DRIFT_SPEED,
+      vx: -dx * PLANET_DRIFT_SPEED,
+      vy: -dy * PLANET_DRIFT_SPEED,
       mass: r * r * 2,
       color: PLANET_COLORS[Math.floor(Math.random() * PLANET_COLORS.length)],
     };
@@ -106,7 +117,7 @@ const SIM = (() => {
   }
 
   // Advance planets by their drift velocity. Remove planets absorbed by the
-  // black hole or that have left the world far outside.
+  // black hole or that have passed far beyond the opposite edge.
   function stepPlanets() {
     const dt = DT * SUBSTEPS;
     for (let i = world.planets.length - 1; i >= 0; i--) {
@@ -120,9 +131,11 @@ const SIM = (() => {
         world.planets.splice(i, 1);
         continue;
       }
-      // Remove if far outside the world
-      if (p.x < -200 || p.y > world.height + 200 ||
-          p.x > world.width + 200 || p.y < -200) {
+      // Remove if far beyond the world on the opposite side (passed through BH)
+      // or too far outside (shouldn't happen, but safety)
+      const distFromCenter = Math.hypot(p.x - BH_X, p.y - BH_Y);
+      const maxDist = Math.hypot(world.width / 2, world.height / 2) + 200;
+      if (distFromCenter > maxDist) {
         world.planets.splice(i, 1);
       }
     }

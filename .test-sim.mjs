@@ -21,33 +21,44 @@ function check(name, cond) {
   if (!cond) failures++;
 }
 
-// Test 1: init creates 3 planets in the upper-right corner
+// BH is at the center (1000, 600). Planets spawn just outside the screen
+// boundary at a random angle and drift towards the center.
+const BH_CX = 1000, BH_CY = 600;
+const HALF_W = 1000, HALF_H = 600;
+
+// Test 1: init creates 3 planets outside the screen boundary
 SIM.init();
 let w = SIM.getWorld();
 check('init creates 3 planets', w.planets.length === 3);
-check('all planets are in upper-right area (x > 1500, y < 500)',
-  w.planets.every(p => p.x > 1500 && p.y < 500));
+check('all planets are outside the screen boundary',
+  w.planets.every(p => {
+    const dx = Math.abs(p.x - BH_CX);
+    const dy = Math.abs(p.y - BH_CY);
+    return dx > HALF_W + 40 || dy > HALF_H + 40;
+  }));
 check('all planets have drift velocity',
   w.planets.every(p => typeof p.vx === 'number' && typeof p.vy === 'number'));
-check('drift velocity points towards BH (60, 1140)',
-  w.planets.every(p => p.vx < 0 && p.vy > 0));
+check('drift velocity points towards BH center',
+  w.planets.every(p => {
+    const dx = BH_CX - p.x, dy = BH_CY - p.y;
+    const dot = p.vx * dx + p.vy * dy;
+    return dot > 0;
+  }));
 
 // Test 2: planets move towards the black hole over time
 const p0 = w.planets[0];
-const p0x = p0.x, p0y = p0.y;
+const distBefore = Math.hypot(p0.x - BH_CX, p0.y - BH_CY);
 for (let i = 0; i < 60; i++) SIM.step(); // 1 second
-check('planet moved towards BH (x decreased)', w.planets[0].x < p0x);
-check('planet moved towards BH (y increased)', w.planets[0].y > p0y);
-const dx = p0x - w.planets[0].x;
-const dy = w.planets[0].y - p0y;
-// Speed should be ~12 units/s
-const dist = Math.hypot(dx, dy);
-check('planet drift speed is approximately 12 units/s', Math.abs(dist - 12) < 3);
+const p0after = w.planets[0];
+const distAfter = Math.hypot(p0after.x - BH_CX, p0after.y - BH_CY);
+check('planet moved closer to BH over time', distAfter < distBefore);
+const closed = distBefore - distAfter;
+check('planet drift speed is approximately 12 units/s', Math.abs(closed - 12) < 3);
 
 // Test 3: satellite moves in direction of net gravity (planets + BH)
 SIM.init();
 w = SIM.getWorld();
-const cx = 1000, cy = 600;
+const cx = 500, cy = 300;
 const G = 5000;
 const SOFTEN2 = 16;
 let expAx = 0, expAy = 0;
@@ -60,10 +71,10 @@ for (const p of w.planets) {
   expAx += f * dx * invD;
   expAy += f * dy * invD;
 }
-// BH contribution
+// BH contribution (BH at center 1000, 600)
 {
-  const dx = 60 - cx;
-  const dy = 1140 - cy;
+  const dx = BH_CX - cx;
+  const dy = BH_CY - cy;
   const d2 = dx * dx + dy * dy + SOFTEN2;
   const invD = 1 / Math.sqrt(d2);
   const f = (G * 100 * invD) / d2;
@@ -87,8 +98,8 @@ check('satellite actually moved (non-zero)', Math.abs(movedX) + Math.abs(movedY)
 // Test 4: reset launches from fixed position
 SIM.resetSatellite();
 const s = SIM.getSatellite();
-check('reset launches from fixed position (1000, 1100)',
-  Math.abs(s.x - 1000) < 1e-9 && Math.abs(s.y - 1100) < 1e-9);
+check('reset launches from fixed position (1000, 1150)',
+  Math.abs(s.x - 1000) < 1e-9 && Math.abs(s.y - 1150) < 1e-9);
 check('reset launches with fixed velocity (0, -80)',
   Math.abs(s.vx - 0) < 1e-9 && Math.abs(s.vy - (-80)) < 1e-9);
 
@@ -189,8 +200,8 @@ const bh = SIM.getBlackHole();
 check('black hole has x, y, mass, r',
   typeof bh.x === 'number' && typeof bh.y === 'number' &&
   typeof bh.mass === 'number' && typeof bh.r === 'number');
-check('black hole is in lower-left corner (x < 100, y > 1000)',
-  bh.x < 100 && bh.y > 1000);
+check('black hole is in the center (1000, 600)',
+  bh.x === 1000 && bh.y === 600);
 SIM.placeSatellite(1800, 100, 0, 0);
 check('satellite not consumed initially', SIM.isConsumed() === false);
 check('black hole radius starts small (< 25)', SIM.getBlackHoleRadius() < 25);
@@ -227,12 +238,11 @@ check('reset after consumed: collected is 0', SIM.getCollected() === 0);
 // Test 21: planets are absorbed by the black hole
 SIM.init();
 w = SIM.getWorld();
-// Place a planet very close to the BH (60, 1140)
-w.planets[0].x = 60 + 25;
-w.planets[0].y = 1140 - 25;
+// Place a planet very close to the BH center (1000, 600)
+w.planets[0].x = BH_CX + 25;
+w.planets[0].y = BH_CY - 25;
 w.planets[0].vx = 0;
 w.planets[0].vy = 0;
-const planetCountBefore = w.planets.length;
 for (let i = 0; i < 120; i++) SIM.step(); // 2 seconds
 check('planets are still present (spawning works)', w.planets.length > 0);
 
@@ -242,7 +252,7 @@ const initialCount = SIM.getWorld().planets.length;
 for (let i = 0; i < 600; i++) SIM.step(); // 10 seconds
 const laterCount = SIM.getWorld().planets.length;
 check('planets are present after 10 seconds', laterCount > 0);
-check('planet count is at most PLANET_MAX_COUNT (6)', laterCount <= 6);
+check('planet count is at most PLANET_MAX_COUNT (3)', laterCount <= 3);
 
 // Test 23: empty tank shuts engine off
 // Test the engine cut logic directly via thrust() without running step()
