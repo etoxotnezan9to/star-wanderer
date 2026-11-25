@@ -16,45 +16,55 @@ function check(name, cond) {
   if (!cond) failures++;
 }
 
-// Black hole at world center (1000, 600), radius 120.
-const BH_CX = 1000, BH_CY = 600, BH_R = 120;
+// World is 6000 x 3600; PLANET_COUNT = 16 planets; min distance between
+// planets = 0.1 * (6000 + 3600) = 960.
+const WORLD_W = 6000, WORLD_H = 3600;
+const PLANET_N = 12;
+const PLANET_MIN_DIST = 0.1 * (WORLD_W + WORLD_H);
 
-// Test 1: init creates 4 planets outside the world, drifting to the center
+// Test 1: init creates PLANET_N static planets inside the world, none near
+// launch, and pairwise distance >= PLANET_MIN_DIST.
 SIM.init();
 let w = SIM.getWorld();
-check('init creates 4 planets', w.planets.length === 4);
-check('all planets start outside the world boundary',
+check('init creates ' + PLANET_N + ' planets', w.planets.length === PLANET_N);
+check('all planets start inside the world boundary',
   w.planets.every(p =>
-    p.x < 0 || p.x > 2000 || p.y < 0 || p.y > 1200));
-check('all planets drift towards the center (dot > 0)',
-  w.planets.every(p => {
-    const dx = BH_CX - p.x, dy = BH_CY - p.y;
-    return p.vx * dx + p.vy * dy > 0;
-  }));
+    p.x >= 0 && p.x <= WORLD_W && p.y >= 0 && p.y <= WORLD_H));
+check('all planets are static (zero velocity)',
+  w.planets.every(p => p.vx === 0 && p.vy === 0));
+check('no planet is too close to the launch position (1700,600)',
+  w.planets.every(p => Math.hypot(p.x - 1700, p.y - 600) >= 250 + p.r));
+check('pairwise planet distance >= ' + PLANET_MIN_DIST,
+  (() => {
+    for (let i = 0; i < w.planets.length; i++) {
+      for (let j = i + 1; j < w.planets.length; j++) {
+        const d = Math.hypot(w.planets[i].x - w.planets[j].x,
+                             w.planets[i].y - w.planets[j].y);
+        if (d < PLANET_MIN_DIST - 1e-6) return false;
+      }
+    }
+    return true;
+  })());
 
-// Test 2: planets move closer to the center over time
-const p0 = w.planets[0];
-const dBefore = Math.hypot(p0.x - BH_CX, p0.y - BH_CY);
-for (let i = 0; i < 60; i++) SIM.step(); // 1 second
-const dAfter = Math.hypot(w.planets[0].x - BH_CX, w.planets[0].y - BH_CY);
-check('planet moved closer to center over time', dAfter < dBefore);
-check('planet drift speed is approximately 12 units/s',
-  Math.abs((dBefore - dAfter) - 12) < 3);
+// Test 2: planets do not move over time
+{
+  const before = w.planets.map(p => ({ x: p.x, y: p.y }));
+  for (let i = 0; i < 600; i++) SIM.step(); // 10 s
+  const after = w.planets.map(p => ({ x: p.x, y: p.y }));
+  check('planets did not move over 10 s',
+    before.every((b, i) => b.x === after[i].x && b.y === after[i].y));
+  check('still exactly ' + PLANET_N + ' planets after 10 s',
+    w.planets.length === PLANET_N);
+}
 
-// Test 3: satellite is attracted by the black hole gravity
-SIM.init();
-SIM.placeSatellite(1400, 600, 0, 0);
-// After some steps the satellite must have gained velocity towards the center
-// (negative x direction), proving the BH gravity is acting.
-for (let i = 0; i < 10; i++) SIM.step();
-const after = SIM.getSatellite();
-check('black hole gravity gives satellite velocity towards center',
-  after.vx < -1 || after.x < 1400);
+// Test 3: no black hole — the hole is removed
+check('getBlackHole returns null', SIM.getBlackHole() === null);
+check('getBlackHoleMass is 0', SIM.getBlackHoleMass() === 0);
 
-// Test 4: net acceleration direction (planets + BH)
+// Test 4: net acceleration direction (planets only, no BH)
 SIM.init();
 w = SIM.getWorld();
-const cx = 1400, cy = 400;
+const cx = 400, cy = 300;
 const G = 5000;
 const SOFTEN2 = 16;
 let expAx = 0, expAy = 0;
@@ -63,14 +73,6 @@ for (const p of w.planets) {
   const d2 = dx * dx + dy * dy + SOFTEN2;
   const invD = 1 / Math.sqrt(d2);
   const f = (G * p.mass * invD) / d2;
-  expAx += f * dx * invD;
-  expAy += f * dy * invD;
-}
-{
-  const dx = BH_CX - cx, dy = BH_CY - cy;
-  const d2 = dx * dx + dy * dy + SOFTEN2;
-  const invD = 1 / Math.sqrt(d2);
-  const f = (G * 5000 * invD) / d2;
   expAx += f * dx * invD;
   expAy += f * dy * invD;
 }
@@ -83,16 +85,18 @@ const accAngle = Math.atan2(expAy, expAx);
 const moveAngle = Math.atan2(my, mx);
 let diff = Math.abs(accAngle - moveAngle);
 if (diff > Math.PI) diff = 2 * Math.PI - diff;
-check('satellite moves along net acceleration', diff < (25 * Math.PI) / 180);
+check('satellite moves along net planet acceleration',
+  diff < (25 * Math.PI) / 180);
 
-// Test 5: reset launches away from the hole
+// Test 5: launch position and velocity
 SIM.resetSatellite();
-const s = SIM.getSatellite();
-const launchDist = Math.hypot(s.x - BH_CX, s.y - BH_CY);
-check('launch position is 700 units from the center',
-  Math.abs(launchDist - 700) < 1e-6);
-check('launch velocity is zero',
-  Math.abs(s.vx) < 1e-9 && Math.abs(s.vy) < 1e-9);
+{
+  const s = SIM.getSatellite();
+  check('launch position is (1700, 600)',
+    Math.abs(s.x - 1700) < 1e-6 && Math.abs(s.y - 600) < 1e-6);
+  check('launch velocity is zero',
+    Math.abs(s.vx) < 1e-9 && Math.abs(s.vy) < 1e-9);
+}
 
 // Test 6: crash on planet
 SIM.init();
@@ -160,50 +164,65 @@ const f1 = SIM.getFuel();
 for (let i = 0; i < 100; i++) SIM.step();
 check('fuel increased from regen', SIM.getFuel() > f1);
 
-// Test 13: event horizon — satellite consumed when crossing the circle
-SIM.init();
-for (const p of SIM.getWorld().planets) { p.x += 5000; p.vx = 0; p.vy = 0; }
-SIM.placeSatellite(BH_CX + BH_R - 5, BH_CY, -50, 0);
-for (let i = 0; i < 30; i++) SIM.step();
-check('satellite consumed inside the horizon', SIM.isConsumed() === true);
-const elapsedAt = SIM.getElapsed();
-SIM.step();
-check('elapsed frozen after consumed', SIM.getElapsed() === elapsedAt);
-
-// Test 14: reset after consumption
-SIM.resetSatellite();
-check('reset after consumed: not consumed', SIM.isConsumed() === false);
-check('reset after consumed: elapsed is 0', SIM.getElapsed() === 0);
-
-// Test 15: planets swallowed by the hole are removed
-SIM.init();
-w = SIM.getWorld();
-w.planets[0].x = BH_CX + 50;
-w.planets[0].y = BH_CY;
-w.planets[0].vx = -12;
-w.planets[0].vy = 0;
-const countBefore = w.planets.length;
-for (let i = 0; i < 30; i++) SIM.step(); // 0.5 s → moves 6 units to center
-check('planet inside the horizon is removed',
-  !w.planets.some(p => p === w.planets[0]) || w.planets.length < countBefore + 1);
-
-// Test 16: new planets spawn over time
-SIM.init();
-for (let i = 0; i < 600; i++) SIM.step(); // 10 s
-check('planets present after 10 s', SIM.getWorld().planets.length > 0);
-check('max 4 planets', SIM.getWorld().planets.length <= 4);
-
-// Test 17: time tracking
+// Test 13: time tracking
 SIM.init();
 check('elapsed starts at 0', SIM.getElapsed() === 0);
 for (let i = 0; i < 60; i++) SIM.step();
 check('elapsed ~1s after 60 frames', Math.abs(SIM.getElapsed() - 1.0) < 0.1);
 
-// Test 18: black hole getters
-const bh = SIM.getBlackHole();
-check('getBlackHole returns center and radius',
-  bh.x === 1000 && bh.y === 600 && bh.r === 120);
-check('getBlackHoleMass is 5000', SIM.getBlackHoleMass() === 5000);
+// Test 14: gravity off (coast) — velocity stays constant while the flag is
+// on, and planet gravity (acceleration) resumes when it is switched off.
+{
+  SIM.init();
+  // Push every planet far away so only the satellite's own motion matters.
+  for (const p of SIM.getWorld().planets) { p.x += 9000; p.y += 9000; }
+  SIM.placeSatellite(1400, 600, 30, -20);
+  SIM.setGravityOff(true);
+  check('isGravityOff true after setGravityOff(true)', SIM.isGravityOff() === true);
+  const s0 = SIM.getSatellite();
+  const x0 = s0.x, y0 = s0.y, vx0 = s0.vx, vy0 = s0.vy;
+  for (let i = 0; i < 60; i++) SIM.step(); // 1 second, key held
+  const s1 = SIM.getSatellite();
+  check('gravity off (held): velocity unchanged after 1s',
+    Math.abs(s1.vx - vx0) < 1e-9 && Math.abs(s1.vy - vy0) < 1e-9);
+  check('gravity off (held): position advanced by v * t',
+    Math.abs((s1.x - x0) - vx0 * 1.0) < 0.5 &&
+    Math.abs((s1.y - y0) - vy0 * 1.0) < 0.5);
+  // Release: planet gravity comes back and changes the velocity.
+  SIM.setGravityOff(false);
+  check('isGravityOff false after setGravityOff(false)', SIM.isGravityOff() === false);
+  const s2 = SIM.getSatellite();
+  const vx2 = s2.vx, vy2 = s2.vy;
+  for (let i = 0; i < 10; i++) SIM.step();
+  const s3 = SIM.getSatellite();
+  check('gravity resumed after release: velocity changes',
+    Math.abs(s3.vx - vx2) > 1e-6 || Math.abs(s3.vy - vy2) > 1e-6);
+  // Reset clears the flag.
+  SIM.resetSatellite();
+  check('reset clears gravityOff', SIM.isGravityOff() === false);
+}
+
+// Test 15: unlimited fuel — the tank never empties, the engine never cuts.
+{
+  SIM.init();
+  SIM.placeSatellite(1400, 600, 0, 0);
+  SIM.setFuelUnlimited(true);
+  check('isFuelUnlimited true after setFuelUnlimited(true)', SIM.isFuelUnlimited() === true);
+  let fired = 0;
+  while (SIM.thrust(1, 0) && fired < 20000) fired++;
+  check('unlimited: held thrust never stops firing', fired === 20000);
+  check('unlimited: tank stays full', SIM.getFuel() === SIM.getFuelMax());
+  check('unlimited: engine never cuts', SIM.isEngineCut() === false);
+  check('unlimited: isThrusting stays true', SIM.isThrusting() === true);
+  SIM.setFuelUnlimited(false);
+  check('isFuelUnlimited false after setFuelUnlimited(false)', SIM.isFuelUnlimited() === false);
+  let fired2 = 0;
+  while (SIM.thrust(1, 0) && fired2 < 20000) fired2++;
+  check('after switch off: held thrust empties the tank', SIM.getFuel() < 0.01);
+  check('after switch off: engine cuts', SIM.isEngineCut() === true);
+  SIM.resetSatellite();
+  check('reset clears fuelUnlimited', SIM.isFuelUnlimited() === false);
+}
 
 console.log(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
 process.exit(failures === 0 ? 0 : 1);

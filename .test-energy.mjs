@@ -10,18 +10,18 @@ const SIM = sandbox.__SIM;
 SIM.init();
 const w = SIM.getWorld();
 
-// Isolate a two-body problem: one small frozen planet + satellite, far from
-// the black hole center (1000, 600) so the BH background field is negligible.
+// Isolate a two-body problem: one frozen planet + satellite. All other
+// planets are pushed far away (mass 0) so the only field is the kept one.
 const keep = w.planets[0];
 for (let i = 1; i < w.planets.length; i++) {
   w.planets[i].mass = 0;
-  w.planets[i].x = 1900;
+  w.planets[i].x = 19000;
   w.planets[i].y = 100;
   w.planets[i].vx = 0;
   w.planets[i].vy = 0;
 }
 while (w.planets.length < 4) {
-  w.planets.push({ x: 1900, y: 100, r: 16, vx: 0, vy: 0, mass: 0, color: '#fff' });
+  w.planets.push({ x: 19000, y: 100, r: 16, vx: 0, vy: 0, mass: 0, color: '#fff' });
 }
 
 const G = 5000;
@@ -42,17 +42,14 @@ function energy() {
   const ke = 0.5 * (s.vx * s.vx + s.vy * s.vy);
   const d = Math.hypot(keep.x - s.x, keep.y - s.y);
   const pe = -G * M / d;
-  // Include BH potential (BH mass = 5000, at 1000, 600)
-  const dBH = Math.hypot(1000 - s.x, 600 - s.y);
-  const peBH = -G * 5000 / dBH;
-  return ke + pe + peBH;
+  return ke + pe;
 }
 
 const e0 = energy();
 let maxDrift = 0;
 for (let i = 0; i < 500; i++) {
   SIM.step();
-  if (SIM.isCrashed() || SIM.isConsumed()) break;
+  if (SIM.isCrashed()) break;
   const drift = Math.abs(energy() - e0) / Math.abs(e0);
   if (drift > maxDrift) maxDrift = drift;
 }

@@ -16,7 +16,9 @@
   let showTrail = true;
   // How the arrow keys map to thrust: 'ship' — relative to the satellite's
   // nose (up = forward, left/right = to its sides); 'screen' — fixed screen
-  // directions (left = towards the left edge of the screen).
+  // directions (left = towards the left edge of the screen); 'flight' —
+  // gravity disabled: the satellite coasts in a straight line at its current
+  // velocity, no thrust is applied.
   let controlMode = 'ship';
   const keysDown = new Set();
   const particles = [];
@@ -30,22 +32,14 @@
   const TRAIL_FADE_DISTANCE = 3000;
   const TRAIL_FADE_STEPS = 64;
 
-  // The camera is locked to a fixed world scale (no zoom) and follows the
-  // ship: it always shows the region on the ship's side of the black hole,
-  // so the event-horizon edge appears only at the screen border. The view
-  // center is the midpoint between the horizon edge (on the ship–hole line)
-  // and the ship, which puts the horizon edge exactly on one screen border.
+  // The camera is locked to a fixed world scale (no zoom) and simply
+  // follows the ship: the view center is the satellite, so the visible
+  // region is whatever world is around the ship at this scale.
   const SCALE = 0.5; // screen pixels per world unit, fixed
 
   function updateCamera() {
-    const bh = SIM.getBlackHole();
-    const dxs = sat.x - bh.x;
-    const dys = sat.y - bh.y;
-    const ds = Math.hypot(dxs, dys) || 1;
-    const ex = bh.x + (dxs / ds) * bh.r;
-    const ey = bh.y + (dys / ds) * bh.r;
-    camera.x = (ex + sat.x) / 2;
-    camera.y = (ey + sat.y) / 2;
+    camera.x = sat.x;
+    camera.y = sat.y;
     camera.zoom = SCALE;
   }
 
@@ -482,6 +476,21 @@
   //          world_x = 0*cos0 - 1*sin0 = 0, world_y = 0*sin0 + 1*cos0 = 1 → (0,1)
   //          But nose is +x, right of nose should be +y (down). ✓
   function currentThrustDir() {
+    // In flight mode the up arrow coasts: gravity is off for as long as it
+    // is held and the satellite moves in a straight line at its current
+    // velocity (no thrust). Any other arrow (or combination) thrusts as
+    // usual, with gravity back on.
+    if (controlMode === 'flight') {
+      const up = keysDown.has('ArrowUp');
+      const down = keysDown.has('ArrowDown');
+      const left = keysDown.has('ArrowLeft');
+      const right = keysDown.has('ArrowRight');
+      if (up && !down && !left && !right) {
+        SIM.setGravityOff(true);
+        return null;
+      }
+      SIM.setGravityOff(false);
+    }
     let lx = 0;
     let ly = 0;
     if (keysDown.has('ArrowUp')) lx += 1;
@@ -489,7 +498,10 @@
     if (keysDown.has('ArrowLeft')) ly -= 1;
     if (keysDown.has('ArrowRight')) ly += 1;
     const len = Math.hypot(lx, ly);
-    if (len < 1e-9) return null;
+    if (len < 1e-9) {
+      if (controlMode === 'flight') SIM.setGravityOff(false);
+      return null;
+    }
     const nlx = lx / len;
     const nly = ly / len;
     if (controlMode === 'screen') {
@@ -634,63 +646,12 @@
     ctx.textAlign = 'left';
   }
 
-  // Draw the black hole in the world center: a black disk (event horizon)
-  // with a glowing rim and a slow accretion swirl. With the camera framing,
-  // only the edge of this disk is visible — it lands on the screen border.
-  function drawEventHorizon() {
-    const bh = SIM.getBlackHole();
-    const c = toScreen(bh.x, bh.y);
-    const r = bh.r * camera.zoom;
-    const dpr = window.devicePixelRatio || 1;
-    const sw = canvas.width / dpr;
-    const sh = canvas.height / dpr;
-    if (c.x < -r * 1.6 - 60 || c.x > sw + r * 1.6 + 60 ||
-        c.y < -r * 1.6 - 60 || c.y > sh + r * 1.6 + 60) return;
-    const t = performance.now() / 1000;
-
-    // 1. Warm glow of the accretion disc around the horizon.
-    const glow = ctx.createRadialGradient(c.x, c.y, r * 0.8, c.x, c.y, r * 1.9);
-    glow.addColorStop(0, 'rgba(255, 170, 80, 0)');
-    glow.addColorStop(0.5, 'rgba(255, 140, 60, 0.28)');
-    glow.addColorStop(0.8, 'rgba(255, 100, 40, 0.12)');
-    glow.addColorStop(1, 'rgba(120, 40, 20, 0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 1.9, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 2. Swirling arcs of the accretion disc.
-    for (let i = 0; i < 3; i++) {
-      const angle = t * (1.6 + i * 0.5) + i * Math.PI * 2 / 3;
-      const ringR = r * (1.12 + i * 0.18);
-      ctx.strokeStyle = 'hsla(' + (28 - i * 6) + ', 95%, ' + (55 + i * 6) + '%, ' +
-        (0.55 - i * 0.12) + ')';
-      ctx.lineWidth = 2 + i;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, ringR, angle, angle + Math.PI * 0.9);
-      ctx.stroke();
-    }
-
-    // 3. The horizon itself — a black disk.
-    ctx.fillStyle = '#000000';
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    // 4. Bright rim of the horizon.
-    const rim = ctx.createRadialGradient(c.x, c.y, r * 0.94, c.x, c.y, r * 1.1);
-    rim.addColorStop(0, 'rgba(255, 200, 120, 0)');
-    rim.addColorStop(0.6, 'rgba(255, 200, 120, 0.65)');
-    rim.addColorStop(1, 'rgba(255, 200, 120, 0)');
-    ctx.fillStyle = rim;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, r * 1.1, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // No black hole in the world — there is nothing to draw here. Kept as a
+  // no-op so the frame loop stays simple.
+  function drawEventHorizon() {}
 
   function drawGameOver() {
-    if (!sat.crashed && !SIM.isConsumed()) return;
+    if (!sat.crashed) return;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
@@ -703,7 +664,7 @@
     const px = (w - pw) / 2;
     const py = (h - ph) / 2;
     ctx.fillStyle = 'rgba(15, 20, 40, 0.95)';
-    ctx.strokeStyle = sat.crashed ? 'rgba(255, 120, 80, 0.6)' : 'rgba(255, 160, 60, 0.6)';
+    ctx.strokeStyle = 'rgba(255, 120, 80, 0.6)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(px, py, pw, ph, 12);
@@ -722,11 +683,7 @@
     const secs = Math.floor(elapsed % 60);
     ctx.font = '18px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(180, 200, 230, 0.9)';
-    if (sat.crashed) {
-      ctx.fillText('Спутник упал на планету', w / 2, py + 80);
-    } else {
-      ctx.fillText('Корабль пересёк горизонт событий', w / 2, py + 80);
-    }
+    ctx.fillText('Спутник упал на планету', w / 2, py + 80);
     ctx.fillText('Космонавты: ' + collected + ' / ' + total +
       '   Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
     // Prompt
@@ -742,9 +699,6 @@
     if (sat.crashed) {
       ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
       ctx.fillText('Спутник упал на планету — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
-    } else if (SIM.isConsumed()) {
-      ctx.fillStyle = 'rgba(255, 180, 120, 0.95)';
-      ctx.fillText('Корабль пересёк горизонт событий чёрной дыры — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
     } else {
       ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
       const elapsed = SIM.getElapsed();
@@ -759,7 +713,7 @@
   // One fixed simulation tick (SIM.TICK seconds of game time): thrust,
   // physics, fuel and exhaust particles all advance by the same amount.
   function tick() {
-    if (!sat.crashed && !SIM.isConsumed()) {
+    if (!sat.crashed) {
       const dir = currentThrustDir();
       if (dir) {
         SIM.thrust(dir.x, dir.y);
@@ -802,7 +756,7 @@
     drawPlanets();
     if (sat.crashed) {
       drawCrashMarker();
-    } else if (!SIM.isConsumed()) {
+    } else {
       drawSatellite();
     }
     drawParticles();
@@ -814,13 +768,19 @@
   const panel = document.getElementById('panel');
 
   const btnControl = document.getElementById('btnControl');
+  const CONTROL_MODES = ['ship', 'screen', 'flight'];
   function showControlMode() {
-    const screen = controlMode === 'screen';
-    btnControl.classList.toggle('active', screen);
-    btnControl.textContent = screen ? 'Управление: экран' : 'Управление: корабль';
+    const label = controlMode === 'ship' ? 'Управление: корабль'
+      : controlMode === 'screen' ? 'Управление: экран'
+        : 'Управление: без гравитации';
+    btnControl.classList.toggle('active', controlMode !== 'ship');
+    btnControl.textContent = label;
   }
   btnControl.addEventListener('click', () => {
-    controlMode = controlMode === 'ship' ? 'screen' : 'ship';
+    const idx = CONTROL_MODES.indexOf(controlMode);
+    controlMode = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
+    // Leaving flight mode stops the coast so gravity is restored immediately.
+    if (controlMode !== 'flight') SIM.setGravityOff(false);
     showControlMode();
     btnControl.blur(); // keep arrow keys and Space away from the button
   });
@@ -833,6 +793,19 @@
     btnTrail.textContent = showTrail ? 'След: да' : 'След: нет';
   });
 
+  const btnFuel = document.getElementById('btnFuel');
+  function showFuelUnlimited() {
+    const on = SIM.isFuelUnlimited();
+    btnFuel.classList.toggle('active', on);
+    btnFuel.textContent = on ? 'Топливо: ∞' : 'Топливо: да';
+  }
+  btnFuel.addEventListener('click', () => {
+    SIM.setFuelUnlimited(!SIM.isFuelUnlimited());
+    showFuelUnlimited();
+    btnFuel.blur();
+  });
+  showFuelUnlimited();
+
   document.getElementById('btnReset').addEventListener('click', () => {
     SIM.resetSatellite();
   });
@@ -844,7 +817,7 @@
   window.addEventListener('resize', resize);
 
   window.addEventListener('keydown', (e) => {
-    if (sat.crashed || SIM.isConsumed()) {
+    if (sat.crashed) {
       SIM.resetSatellite();
       keysDown.clear();
       return;
