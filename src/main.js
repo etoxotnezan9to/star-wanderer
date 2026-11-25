@@ -14,11 +14,8 @@
   };
 
   let showTrail = true;
-  // How the arrow keys map to thrust: 'ship' — relative to the satellite's
-  // nose (up = forward, left/right = to its sides); 'screen' — fixed screen
-  // directions (left = towards the left edge of the screen); 'flight' —
-  // gravity disabled: the satellite coasts in a straight line at its current
-  // velocity, no thrust is applied.
+  // How the arrow keys map to steering: 'ship' — relative to the
+  // satellite's nose; 'screen' — fixed screen directions.
   let controlMode = 'ship';
   const keysDown = new Set();
   const particles = [];
@@ -37,9 +34,29 @@
   // region is whatever world is around the ship at this scale.
   const SCALE = 0.5; // screen pixels per world unit, fixed
 
+  // The camera target is the satellite in flying mode and the orbit planet
+  // while orbiting. The camera smoothly lerps towards the target each frame
+  // so switching between the two feels like a gentle re-focus rather than a
+  // jump.
+  const CAMERA_LERP = 0.03; // fraction of the remaining distance per frame
+  let camTargetX = world.width / 2;
+  let camTargetY = world.height / 2;
+
   function updateCamera() {
-    camera.x = sat.x;
-    camera.y = sat.y;
+    // Pick the target
+    if (SIM.isOrbiting()) {
+      const op = SIM.getOrbitPlanet();
+      if (op) {
+        camTargetX = op.x;
+        camTargetY = op.y;
+      }
+    } else {
+      camTargetX = sat.x;
+      camTargetY = sat.y;
+    }
+    // Lerp the camera towards the target
+    camera.x += (camTargetX - camera.x) * CAMERA_LERP;
+    camera.y += (camTargetY - camera.y) * CAMERA_LERP;
     camera.zoom = SCALE;
   }
 
@@ -142,6 +159,39 @@
     ctx.globalAlpha = 1;
   }
 
+  // A simplified astronaut icon for off-screen astronauts: a helmet circle
+  // with a visor and a small torso, drawn at a fixed screen size.
+  function drawAstronautIcon(x, y, r) {
+    ctx.save();
+    // Torso
+    ctx.fillStyle = '#e8edf5';
+    ctx.strokeStyle = 'rgba(130, 150, 180, 0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 0.3, r * 0.4, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Helmet
+    ctx.beginPath();
+    ctx.arc(x, y - r * 0.4, r * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Visor
+    ctx.fillStyle = 'rgba(30, 50, 80, 0.92)';
+    ctx.beginPath();
+    ctx.ellipse(x, y - r * 0.4, r * 0.3, r * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Glow ring to make it stand out at the screen edge
+    ctx.strokeStyle = 'rgba(120, 220, 255, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(x, y, r * 1.3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   function drawAstronauts() {
     const astronauts = SIM.getAstronauts();
     const dpr = window.devicePixelRatio || 1;
@@ -150,8 +200,28 @@
     for (const a of astronauts) {
       const c = toScreen(a.x, a.y);
       const r = a.r * camera.zoom;
-      if (c.x < -r * 2 - 20 || c.x > screenW + r * 2 + 20 ||
-          c.y < -r * 2 - 20 || c.y > screenH + r * 2 + 20) continue;
+      const margin = r * 2 + 20;
+      const onScreen = c.x >= -margin && c.x <= screenW + margin &&
+                       c.y >= -margin && c.y <= screenH + margin;
+      if (!onScreen) {
+        // Draw a small astronaut icon at the screen edge, on the ray from
+        // the satellite to this astronaut.
+        const sc = toScreen(sat.x, sat.y);
+        const dx = c.x - sc.x;
+        const dy = c.y - sc.y;
+        // Find where this ray hits the screen border (with a small inset)
+        const inset = 12;
+        let t = Infinity;
+        if (dx > 1e-9) t = Math.min(t, (screenW - inset - sc.x) / dx);
+        if (dx < -1e-9) t = Math.min(t, (inset - sc.x) / dx);
+        if (dy > 1e-9) t = Math.min(t, (screenH - inset - sc.y) / dy);
+        if (dy < -1e-9) t = Math.min(t, (inset - sc.y) / dy);
+        if (!isFinite(t) || t < 0) continue;
+        const ex = sc.x + dx * t;
+        const ey = sc.y + dy * t;
+        drawAstronautIcon(ex, ey, 10);
+        continue;
+      }
 
       const suitColor = '#e8edf5';
       const suitOutline = 'rgba(130, 150, 180, 0.8)';
@@ -350,6 +420,22 @@
         ctx.fill();
       }
 
+      // 3.5. Attraction circle: a dashed circle showing the radius within
+      //      which the satellite gets captured into orbit.
+      const ar = SIM.getAttractionRadius(p);
+      const arScreen = ar * camera.zoom;
+      if (arScreen > 5) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100, 180, 255, 0.35)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, arScreen, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
       // 4. Terminator shadow: darken the side away from the light with a
       //    linear gradient perpendicular to the light direction.
       const lx = -LIGHT_X;
@@ -457,6 +543,47 @@
     ctx.stroke();
   }
 
+  // While orbiting, draw a dashed line from the satellite in the direction
+  // of its current velocity (tangential), extending to the screen border.
+  function drawOrbitVelocityHint() {
+    const c = toScreen(sat.x, sat.y);
+    const sp = Math.hypot(sat.vx, sat.vy);
+    if (sp < 1e-9) return;
+    const ux = sat.vx / sp;
+    const uy = sat.vy / sp;
+    const dpr = window.devicePixelRatio || 1;
+    const sw = canvas.width / dpr;
+    const sh = canvas.height / dpr;
+    let t = Infinity;
+    if (ux > 1e-9) t = Math.min(t, (sw - c.x) / ux);
+    if (ux < -1e-9) t = Math.min(t, -c.x / ux);
+    if (uy > 1e-9) t = Math.min(t, (sh - c.y) / uy);
+    if (uy < -1e-9) t = Math.min(t, -c.y / uy);
+    if (!isFinite(t) || t < 0) return;
+    const ex = c.x + ux * t;
+    const ey = c.y + uy * t;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120, 220, 255, 0.25)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    // Arrowhead at the end
+    ctx.setLineDash([]);
+    const headLen = 10;
+    const headAngle = 0.4;
+    const a = Math.atan2(uy, ux);
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - headLen * Math.cos(a - headAngle), ey - headLen * Math.sin(a - headAngle));
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - headLen * Math.cos(a + headAngle), ey - headLen * Math.sin(a + headAngle));
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Compute the combined thrust direction from held arrow keys in the
   // satellite's local coordinate frame, rotated into world coordinates by
   // the current heading (nose angle).
@@ -476,21 +603,8 @@
   //          world_x = 0*cos0 - 1*sin0 = 0, world_y = 0*sin0 + 1*cos0 = 1 → (0,1)
   //          But nose is +x, right of nose should be +y (down). ✓
   function currentThrustDir() {
-    // In flight mode the up arrow coasts: gravity is off for as long as it
-    // is held and the satellite moves in a straight line at its current
-    // velocity (no thrust). Any other arrow (or combination) thrusts as
-    // usual, with gravity back on.
-    if (controlMode === 'flight') {
-      const up = keysDown.has('ArrowUp');
-      const down = keysDown.has('ArrowDown');
-      const left = keysDown.has('ArrowLeft');
-      const right = keysDown.has('ArrowRight');
-      if (up && !down && !left && !right) {
-        SIM.setGravityOff(true);
-        return null;
-      }
-      SIM.setGravityOff(false);
-    }
+    // While orbiting, steering is disabled — only Space (break orbit) works.
+    if (SIM.isOrbiting()) return null;
     let lx = 0;
     let ly = 0;
     if (keysDown.has('ArrowUp')) lx += 1;
@@ -498,10 +612,7 @@
     if (keysDown.has('ArrowLeft')) ly -= 1;
     if (keysDown.has('ArrowRight')) ly += 1;
     const len = Math.hypot(lx, ly);
-    if (len < 1e-9) {
-      if (controlMode === 'flight') SIM.setGravityOff(false);
-      return null;
-    }
+    if (len < 1e-9) return null;
     const nlx = lx / len;
     const nly = ly / len;
     if (controlMode === 'screen') {
@@ -575,33 +686,6 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawFuelBar() {
-    const fuel = SIM.getFuel();
-    const max = SIM.getFuelMax();
-    const frac = max > 0 ? fuel / max : 0;
-    const barW = 160;
-    const barH = 14;
-    const x = 16;
-    // Below the button panel, which may wrap onto several rows.
-    const y = panel.getBoundingClientRect().bottom + 22;
-    ctx.fillStyle = 'rgba(10, 18, 35, 0.85)';
-    ctx.fillRect(x - 2, y - 2, barW + 4, barH + 4);
-    ctx.strokeStyle = 'rgba(90, 130, 200, 0.7)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x - 2, y - 2, barW + 4, barH + 4);
-    const fillColor = frac > 0.5 ? '#5fd68a' : frac > 0.2 ? '#e8c84b' : '#e0604a';
-    ctx.fillStyle = fillColor;
-    ctx.fillRect(x, y, barW * frac, barH);
-    ctx.fillStyle = 'rgba(220, 235, 255, 0.9)';
-    ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText('Топливо: ' + Math.round(fuel) + '%', x, y - 6);
-    if (SIM.isEngineCut()) {
-      ctx.fillStyle = 'rgba(255, 150, 110, 0.95)';
-      ctx.fillText('Двигатель выключен: бак пуст. Отпустите стрелки',
-        x, y + barH + 16);
-    }
-  }
-
   function drawAstronautCounter() {
     const collected = SIM.getCollected();
     const total = SIM.getTotalAstronauts();
@@ -651,10 +735,12 @@
   function drawEventHorizon() {}
 
   function drawGameOver() {
-    if (!sat.crashed) return;
+    if (!sat.crashed && !SIM.isEscaped() && !SIM.isWon()) return;
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width / dpr;
     const h = canvas.height / dpr;
+    const isWon = SIM.isWon();
+    const isEscaped = SIM.isEscaped();
     // Dark overlay
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, w, h);
@@ -664,7 +750,9 @@
     const px = (w - pw) / 2;
     const py = (h - ph) / 2;
     ctx.fillStyle = 'rgba(15, 20, 40, 0.95)';
-    ctx.strokeStyle = 'rgba(255, 120, 80, 0.6)';
+    ctx.strokeStyle = isWon ? 'rgba(80, 220, 120, 0.7)'
+      : isEscaped ? 'rgba(255, 200, 80, 0.6)'
+        : 'rgba(255, 120, 80, 0.6)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(px, py, pw, ph, 12);
@@ -674,7 +762,13 @@
     ctx.fillStyle = 'rgba(220, 200, 255, 0.95)';
     ctx.font = 'bold 24px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Полёт завершён', w / 2, py + 40);
+    if (isWon) {
+      ctx.fillText('Успешное прохождение!', w / 2, py + 40);
+    } else if (isEscaped) {
+      ctx.fillText('Полёт завершён', w / 2, py + 40);
+    } else {
+      ctx.fillText('Полёт завершён', w / 2, py + 40);
+    }
     // Stats
     const collected = SIM.getCollected();
     const total = SIM.getTotalAstronauts();
@@ -683,7 +777,13 @@
     const secs = Math.floor(elapsed % 60);
     ctx.font = '18px system-ui, sans-serif';
     ctx.fillStyle = 'rgba(180, 200, 230, 0.9)';
-    ctx.fillText('Спутник упал на планету', w / 2, py + 80);
+    if (isWon) {
+      ctx.fillText('Все космонавты спасены!', w / 2, py + 80);
+    } else if (isEscaped) {
+      ctx.fillText('Спутник улетел за пределы мира', w / 2, py + 80);
+    } else {
+      ctx.fillText('Спутник упал на планету', w / 2, py + 80);
+    }
     ctx.fillText('Космонавты: ' + collected + ' / ' + total +
       '   Время: ' + mins + ':' + String(secs).padStart(2, '0'), w / 2, py + 110);
     // Prompt
@@ -699,21 +799,33 @@
     if (sat.crashed) {
       ctx.fillStyle = 'rgba(255, 120, 80, 0.95)';
       ctx.fillText('Спутник упал на планету — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
+    } else if (SIM.isEscaped()) {
+      ctx.fillStyle = 'rgba(255, 200, 80, 0.95)';
+      ctx.fillText('Спутник улетел за пределы мира — полёт завершён. Нажмите любую клавишу для сброса.', 16, window.innerHeight - 16);
+    } else if (SIM.isWon()) {
+      ctx.fillStyle = 'rgba(80, 220, 120, 0.95)';
+      ctx.fillText('Все космонавты спасены! Нажмите любую клавишу для нового полёта.', 16, window.innerHeight - 16);
     } else {
       ctx.fillStyle = 'rgba(180, 200, 225, 0.85)';
       const elapsed = SIM.getElapsed();
       const mins = Math.floor(elapsed / 60);
       const secs = Math.floor(elapsed % 60);
-      ctx.fillText('Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0'), 16, window.innerHeight - 16);
+      let line = 'Скорость: ' + speed.toFixed(1) + ' ед/с   Время: ' + mins + ':' + String(secs).padStart(2, '0');
+      if (SIM.isOrbiting()) {
+        line += '   [Орбита: r=' + SIM.getOrbitRadius().toFixed(0) + ', ПРОБЕЛ — оторваться]';
+      }
+      ctx.fillText(line, 16, window.innerHeight - 16);
     }
-    drawFuelBar();
     drawAstronautCounter();
   }
 
   // One fixed simulation tick (SIM.TICK seconds of game time): thrust,
   // physics, fuel and exhaust particles all advance by the same amount.
   function tick() {
-    if (!sat.crashed) {
+    if (!sat.crashed && !SIM.isEscaped() && !SIM.isWon()) {
+      if (keysDown.has(' ') && SIM.isOrbiting()) {
+        SIM.breakOrbit();
+      }
       const dir = currentThrustDir();
       if (dir) {
         SIM.thrust(dir.x, dir.y);
@@ -758,6 +870,7 @@
       drawCrashMarker();
     } else {
       drawSatellite();
+      if (SIM.isOrbiting()) drawOrbitVelocityHint();
     }
     drawParticles();
     drawHud();
@@ -767,69 +880,42 @@
 
   const panel = document.getElementById('panel');
 
-  const btnControl = document.getElementById('btnControl');
-  const CONTROL_MODES = ['ship', 'screen', 'flight'];
-  function showControlMode() {
-    const label = controlMode === 'ship' ? 'Управление: корабль'
-      : controlMode === 'screen' ? 'Управление: экран'
-        : 'Управление: без гравитации';
-    btnControl.classList.toggle('active', controlMode !== 'ship');
-    btnControl.textContent = label;
-  }
-  btnControl.addEventListener('click', () => {
-    const idx = CONTROL_MODES.indexOf(controlMode);
-    controlMode = CONTROL_MODES[(idx + 1) % CONTROL_MODES.length];
-    // Leaving flight mode stops the coast so gravity is restored immediately.
-    if (controlMode !== 'flight') SIM.setGravityOff(false);
-    showControlMode();
-    btnControl.blur(); // keep arrow keys and Space away from the button
-  });
-  showControlMode();
-
-  const btnTrail = document.getElementById('btnTrail');
-  btnTrail.addEventListener('click', () => {
-    showTrail = !showTrail;
-    btnTrail.classList.toggle('active', showTrail);
-    btnTrail.textContent = showTrail ? 'След: да' : 'След: нет';
-  });
-
-  const btnFuel = document.getElementById('btnFuel');
-  function showFuelUnlimited() {
-    const on = SIM.isFuelUnlimited();
-    btnFuel.classList.toggle('active', on);
-    btnFuel.textContent = on ? 'Топливо: ∞' : 'Топливо: да';
-  }
-  btnFuel.addEventListener('click', () => {
-    SIM.setFuelUnlimited(!SIM.isFuelUnlimited());
-    showFuelUnlimited();
-    btnFuel.blur();
-  });
-  showFuelUnlimited();
-
   document.getElementById('btnReset').addEventListener('click', () => {
     SIM.resetSatellite();
+    camera.x = sat.x;
+    camera.y = sat.y;
+    camTargetX = sat.x;
+    camTargetY = sat.y;
   });
 
   document.getElementById('btnPlanets').addEventListener('click', () => {
     SIM.randomizePlanets();
+    camera.x = sat.x;
+    camera.y = sat.y;
+    camTargetX = sat.x;
+    camTargetY = sat.y;
   });
 
   window.addEventListener('resize', resize);
 
   window.addEventListener('keydown', (e) => {
-    if (sat.crashed) {
+    if (sat.crashed || SIM.isEscaped() || SIM.isWon()) {
       SIM.resetSatellite();
+      camera.x = sat.x;
+      camera.y = sat.y;
+      camTargetX = sat.x;
+      camTargetY = sat.y;
       keysDown.clear();
       return;
     }
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
       e.preventDefault();
       keysDown.add(e.key);
     }
   });
 
   window.addEventListener('keyup', (e) => {
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
       keysDown.delete(e.key);
     }
   });
@@ -840,6 +926,12 @@
 
   resize();
   SIM.init();
+  // Snap the camera to the satellite on first frame so there is no lerp
+  // from the initial world-center position.
+  camera.x = sat.x;
+  camera.y = sat.y;
+  camTargetX = sat.x;
+  camTargetY = sat.y;
   updateCamera();
   requestAnimationFrame(frame);
 })();
