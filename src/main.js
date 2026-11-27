@@ -159,39 +159,6 @@
     ctx.globalAlpha = 1;
   }
 
-  // A simplified astronaut icon for off-screen astronauts: a helmet circle
-  // with a visor and a small torso, drawn at a fixed screen size.
-  function drawAstronautIcon(x, y, r) {
-    ctx.save();
-    // Torso
-    ctx.fillStyle = '#e8edf5';
-    ctx.strokeStyle = 'rgba(130, 150, 180, 0.8)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(x, y + r * 0.3, r * 0.4, r * 0.6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    // Helmet
-    ctx.beginPath();
-    ctx.arc(x, y - r * 0.4, r * 0.45, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    // Visor
-    ctx.fillStyle = 'rgba(30, 50, 80, 0.92)';
-    ctx.beginPath();
-    ctx.ellipse(x, y - r * 0.4, r * 0.3, r * 0.22, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Glow ring to make it stand out at the screen edge
-    ctx.strokeStyle = 'rgba(120, 220, 255, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.arc(x, y, r * 1.3, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
   function drawAstronauts() {
     const astronauts = SIM.getAstronauts();
     const dpr = window.devicePixelRatio || 1;
@@ -203,25 +170,7 @@
       const margin = r * 2 + 20;
       const onScreen = c.x >= -margin && c.x <= screenW + margin &&
                        c.y >= -margin && c.y <= screenH + margin;
-      if (!onScreen) {
-        // Draw a small astronaut icon at the screen edge, on the ray from
-        // the satellite to this astronaut.
-        const sc = toScreen(sat.x, sat.y);
-        const dx = c.x - sc.x;
-        const dy = c.y - sc.y;
-        // Find where this ray hits the screen border (with a small inset)
-        const inset = 12;
-        let t = Infinity;
-        if (dx > 1e-9) t = Math.min(t, (screenW - inset - sc.x) / dx);
-        if (dx < -1e-9) t = Math.min(t, (inset - sc.x) / dx);
-        if (dy > 1e-9) t = Math.min(t, (screenH - inset - sc.y) / dy);
-        if (dy < -1e-9) t = Math.min(t, (inset - sc.y) / dy);
-        if (!isFinite(t) || t < 0) continue;
-        const ex = sc.x + dx * t;
-        const ey = sc.y + dy * t;
-        drawAstronautIcon(ex, ey, 10);
-        continue;
-      }
+      if (!onScreen) continue;
 
       const suitColor = '#e8edf5';
       const suitOutline = 'rgba(130, 150, 180, 0.8)';
@@ -362,6 +311,66 @@
   // Light source direction (world coords, normalized). Fixed to upper-left.
   const LIGHT_X = -0.7;
   const LIGHT_Y = -0.7;
+
+  // Draw direction indicators for off-screen planets: small arrow icons at
+  // the screen edge, on the ray from the satellite to each off-screen
+  // planet, so the player can see where the planets are.
+  function drawPlanetIndicators() {
+    const dpr = window.devicePixelRatio || 1;
+    const screenW = canvas.width / dpr;
+    const screenH = canvas.height / dpr;
+    const sc = toScreen(sat.x, sat.y);
+    for (const p of world.planets) {
+      const c = toScreen(p.x, p.y);
+      const r = p.r * camera.zoom;
+      const margin = r + 20;
+      const onScreen = c.x >= -margin && c.x <= screenW + margin &&
+                       c.y >= -margin && c.y <= screenH + margin;
+      if (onScreen) continue;
+      // Ray from satellite to planet
+      const dx = c.x - sc.x;
+      const dy = c.y - sc.y;
+      const inset = 16;
+      let t = Infinity;
+      if (dx > 1e-9) t = Math.min(t, (screenW - inset - sc.x) / dx);
+      if (dx < -1e-9) t = Math.min(t, (inset - sc.x) / dx);
+      if (dy > 1e-9) t = Math.min(t, (screenH - inset - sc.y) / dy);
+      if (dy < -1e-9) t = Math.min(t, (inset - sc.y) / dy);
+      if (!isFinite(t) || t < 0) continue;
+      const ex = sc.x + dx * t;
+      const ey = sc.y + dy * t;
+      // Draw a small filled circle with the planet's color + arrow
+      const angle = Math.atan2(dy, dx);
+      ctx.save();
+      // Circle (planet color)
+      ctx.fillStyle = p.color;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(ex, ey, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Arrow pointing outward
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      const aLen = 12;
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex + aLen * Math.cos(angle), ey + aLen * Math.sin(angle));
+      ctx.stroke();
+      // Arrowhead
+      const hLen = 7;
+      const hAng = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(ex + aLen * Math.cos(angle), ey + aLen * Math.sin(angle));
+      ctx.lineTo(ex + (aLen - hLen) * Math.cos(angle - hAng), ey + (aLen - hLen) * Math.sin(angle - hAng));
+      ctx.moveTo(ex + aLen * Math.cos(angle), ey + aLen * Math.sin(angle));
+      ctx.lineTo(ex + (aLen - hLen) * Math.cos(angle + hAng), ey + (aLen - hLen) * Math.sin(angle + hAng));
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 
   function drawPlanets() {
     const dpr = window.devicePixelRatio || 1;
@@ -866,6 +875,7 @@
     drawTrail();
     drawAstronauts();
     drawPlanets();
+    drawPlanetIndicators();
     if (sat.crashed) {
       drawCrashMarker();
     } else {
